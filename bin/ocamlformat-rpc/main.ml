@@ -35,6 +35,13 @@ let format fg conf source =
   let opts = Conf.{debug= false; margin_check= false} in
   Translation_unit.parse_and_format fg ~input_name ~source conf opts
 
+type config_error =
+  [ `Bad_value of string * string
+  | `Malformed of string
+  | `Misplaced of string * string
+  | `Unknown of string * [`Msg of string] option
+  | `Bad_version of string * string ]
+
 let rec rpc_main = function
   | Waiting_for_version -> (
     match Init.read_input stdin with
@@ -89,17 +96,21 @@ let rec rpc_main = function
       | `Config c -> (
           let rec update conf = function
             | [] -> Ok conf
+            | ("version", value) :: t ->
+                if String.equal Version.current value then update conf t
+                else
+                  Error (`Bad_version (Version.current, value) : config_error)
             | (name, value) :: t -> (
               match Conf.update_value conf ~name ~value with
               | Ok c -> update c t
-              | Error e -> Error e )
+              | Error e -> Error (e :> config_error) )
           in
           match update conf c with
           | Ok conf ->
               V1.Command.output stdout (`Config c) ;
               Out_channel.flush stdout ;
               rpc_main (Version_defined (v, conf))
-          | Error e ->
+          | Error e -> (
               let msg =
                 match e with
                 | `Bad_value (x, y) ->
@@ -111,10 +122,13 @@ let rec rpc_main = function
                       y
                 | `Unknown (x, _) ->
                     Format.sprintf "Unknown configuration option %s" x
+                | `Bad_version (current, asked) ->
+                    Format.sprintf "expecting %S but got %S" current asked
               in
               V1.Command.output stdout (`Error msg) ;
               Out_channel.flush stdout ;
-              rpc_main state ) ) )
+              match e with `Bad_version _ -> Ok () | _ -> rpc_main state ) )
+      ) )
 
 let rpc_main () = rpc_main Waiting_for_version
 
