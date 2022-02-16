@@ -113,7 +113,7 @@
  (action
   (with-stdout-to args_grouped-conventional.ml.stdout
    (with-stderr-to args_grouped-conventional.ml.stderr
-     (run %{bin:ocamlformat} --margin-check --profile=conventional --margin=30 %{dep:tests/args_grouped.ml})))))
+     (run %{bin:ocamlformat} --margin-check --profile=conventional --margin=30 --max-iters=3 %{dep:tests/args_grouped.ml})))))
 
 (rule
  (alias runtest)
@@ -820,12 +820,30 @@
 (rule
  (alias runtest)
  (package ocamlformat)
- (action (diff tests/cinaps.ml cinaps.ml.stdout)))
+ (action (diff tests/cinaps.ml.ref cinaps.ml.stdout)))
 
 (rule
  (alias runtest)
  (package ocamlformat)
  (action (diff tests/cinaps.ml.err cinaps.ml.stderr)))
+
+(rule
+ (deps tests/.ocamlformat )
+ (package ocamlformat)
+ (action
+  (with-stdout-to class_expr.ml.stdout
+   (with-stderr-to class_expr.ml.stderr
+     (run %{bin:ocamlformat} --margin-check %{dep:tests/class_expr.ml})))))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/class_expr.ml class_expr.ml.stdout)))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/class_expr.ml.err class_expr.ml.stderr)))
 
 (rule
  (deps tests/.ocamlformat )
@@ -1006,6 +1024,24 @@
  (alias runtest)
  (package ocamlformat)
  (action (diff tests/comments.ml.err comments.ml.stderr)))
+
+(rule
+ (deps tests/.ocamlformat )
+ (package ocamlformat)
+ (action
+  (with-stdout-to comments.mli.stdout
+   (with-stderr-to comments.mli.stderr
+     (run %{bin:ocamlformat} --margin-check %{dep:tests/comments.mli})))))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/comments.mli comments.mli.stdout)))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/comments.mli.err comments.mli.stderr)))
 
 (rule
  (deps tests/.ocamlformat )
@@ -1549,6 +1585,24 @@
  (alias runtest)
  (package ocamlformat)
  (action (diff tests/exceptions.ml.err exceptions.ml.stderr)))
+
+(rule
+ (deps tests/.ocamlformat )
+ (package ocamlformat)
+ (action
+  (with-stdout-to exceptions.mli.stdout
+   (with-stderr-to exceptions.mli.stderr
+     (run %{bin:ocamlformat} --margin-check %{dep:tests/exceptions.mli})))))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/exceptions.mli exceptions.mli.stdout)))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/exceptions.mli.err exceptions.mli.stderr)))
 
 (rule
  (deps tests/.ocamlformat )
@@ -3277,6 +3331,24 @@
  (deps tests/.ocamlformat )
  (package ocamlformat)
  (action
+  (with-stdout-to list_normalized.ml.stdout
+   (with-stderr-to list_normalized.ml.stderr
+     (run %{bin:ocamlformat} --margin-check --max-iters=4 %{dep:tests/list_normalized.ml})))))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/list_normalized.ml.ref list_normalized.ml.stdout)))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/list_normalized.ml.err list_normalized.ml.stderr)))
+
+(rule
+ (deps tests/.ocamlformat )
+ (package ocamlformat)
+ (action
   (with-stdout-to loc_stack.ml.stdout
    (with-stderr-to loc_stack.ml.stderr
      (run %{bin:ocamlformat} --margin-check -n 3 %{dep:tests/loc_stack.ml})))))
@@ -3705,6 +3777,42 @@
  (alias runtest)
  (package ocamlformat)
  (action (diff tests/object2.ml.err object2.ml.stderr)))
+
+(rule
+ (deps tests/.ocamlformat )
+ (package ocamlformat)
+ (action
+  (with-stdout-to object_expr-414.ml.stdout
+   (with-stderr-to object_expr-414.ml.stderr
+     (run %{bin:ocamlformat} --margin-check --ocaml-version=4.14.0 %{dep:tests/object_expr.ml})))))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/object_expr-414.ml.ref object_expr-414.ml.stdout)))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/object_expr-414.ml.err object_expr-414.ml.stderr)))
+
+(rule
+ (deps tests/.ocamlformat )
+ (package ocamlformat)
+ (action
+  (with-stdout-to object_expr.ml.stdout
+   (with-stderr-to object_expr.ml.stderr
+     (run %{bin:ocamlformat} --margin-check %{dep:tests/object_expr.ml})))))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/object_expr.ml.ref object_expr.ml.stdout)))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/object_expr.ml.err object_expr.ml.stderr)))
 
 (rule
  (deps tests/.ocamlformat )
@@ -4266,6 +4374,42 @@
  (alias runtest)
  (package ocamlformat)
  (action (diff tests/remove_extra_parens.ml.err remove_extra_parens.ml.stderr)))
+
+(rule
+ (deps tests/.ocamlformat )
+ (package ocamlformat)
+ (action
+  (with-stdout-to repl.ml.stdout
+   (with-stderr-to repl.ml.stderr
+     (run %{bin:ocamlformat} --margin-check --parse-toplevel-phrases --repl-file %{dep:tests/repl.ml})))))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/repl.ml.ref repl.ml.stdout)))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/repl.ml.err repl.ml.stderr)))
+
+(rule
+ (deps tests/.ocamlformat )
+ (package ocamlformat)
+ (action
+  (with-stdout-to repl.mli.stdout
+   (with-stderr-to repl.mli.stderr
+     (run %{bin:ocamlformat} --margin-check --parse-toplevel-phrases %{dep:tests/repl.mli})))))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/repl.mli.ref repl.mli.stdout)))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/repl.mli.err repl.mli.stderr)))
 
 (rule
  (deps tests/.ocamlformat )
@@ -4906,7 +5050,7 @@
  (action
   (with-stdout-to wrap_comments.ml.stdout
    (with-stderr-to wrap_comments.ml.stderr
-     (run %{bin:ocamlformat} --margin-check --profile=ocamlformat %{dep:tests/wrap_comments.ml})))))
+     (run %{bin:ocamlformat} --margin-check --profile=ocamlformat --max-iters=3 %{dep:tests/wrap_comments.ml})))))
 
 (rule
  (alias runtest)
@@ -4935,6 +5079,24 @@
  (alias runtest)
  (package ocamlformat)
  (action (diff tests/wrap_comments_break.ml.err wrap_comments_break.ml.stderr)))
+
+(rule
+ (deps tests/.ocamlformat )
+ (package ocamlformat)
+ (action
+  (with-stdout-to wrap_invalid_doc_comments.ml.stdout
+   (with-stderr-to wrap_invalid_doc_comments.ml.stderr
+     (run %{bin:ocamlformat} --margin-check --parse-docstrings --wrap-comments %{dep:tests/wrap_invalid_doc_comments.ml})))))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/wrap_invalid_doc_comments.ml wrap_invalid_doc_comments.ml.stdout)))
+
+(rule
+ (alias runtest)
+ (package ocamlformat)
+ (action (diff tests/wrap_invalid_doc_comments.ml.err wrap_invalid_doc_comments.ml.stderr)))
 
 (rule
  (deps tests/.ocamlformat )

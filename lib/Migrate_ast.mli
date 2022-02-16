@@ -9,18 +9,14 @@
 (*                                                                        *)
 (**************************************************************************)
 
-module Asttypes : sig
-  include module type of Asttypes
+module Lexing : sig
+  include module type of Lexing
 
-  val is_private : private_flag -> bool
+  val set_position : lexbuf -> position -> unit
+  (** @since ocaml-4.11 *)
 
-  val is_open : closed_flag -> bool
-
-  val is_override : override_flag -> bool
-
-  val is_mutable : mutable_flag -> bool
-
-  val is_recursive : rec_flag -> bool
+  val set_filename : lexbuf -> string -> unit
+  (** @since ocaml-4.11 *)
 end
 
 module Position : sig

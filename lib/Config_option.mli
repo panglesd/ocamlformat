@@ -9,6 +9,16 @@
 (*                                                                        *)
 (**************************************************************************)
 
+module Error : sig
+  type t =
+    | Bad_value of string * string
+    | Malformed of string
+    | Misplaced of string * string
+    | Unknown of string * [`Msg of string] option
+
+  val to_string : t -> string
+end
+
 module type CONFIG = sig
   type config
 
@@ -46,9 +56,9 @@ module Make (C : CONFIG) : sig
 
   val section_name : kind -> status -> string
 
-  val deprecated : since_version:string -> string -> deprecated
+  val deprecated : since:Version.t -> string -> deprecated
 
-  val removed : since_version:string -> string -> removed
+  val removed : since:Version.t -> string -> removed
 
   module Value : sig
     type 'a t
@@ -62,13 +72,13 @@ module Make (C : CONFIG) : sig
         displayed. *)
     type t
 
-    val make : name:string -> version:string -> msg:string -> t
+    val make : name:string -> since:Version.t -> msg:string -> t
     (** [name] is the configuration value that was removed in version
-        [version]. [msg] explains how to get the former behaviour. *)
+        [since]. [msg] explains how to get the former behaviour. *)
 
     val make_list :
-      names:string list -> version:string -> msg:string -> t list
-    (** Shorthand for [mk] when [version] and [msg] are shared. This can be
+      names:string list -> since:Version.t -> msg:string -> t list
+    (** Shorthand for [mk] when [since] and [msg] are shared. This can be
         used when multiple values are removed at the same time. *)
   end
 
@@ -87,9 +97,9 @@ module Make (C : CONFIG) : sig
     -> 'a option_decl
 
   val removed_option :
-    names:string list -> version:string -> msg:string -> unit
+    names:string list -> since:Version.t -> msg:string -> unit
   (** Declare an option as removed. Using such an option will result in an
-      helpful error including [msg] and [version]. *)
+      helpful error including [msg] and [since]. *)
 
   val default : 'a t -> 'a
 
@@ -101,12 +111,7 @@ module Make (C : CONFIG) : sig
     -> name:string
     -> value:string
     -> inline:bool
-    -> ( config
-       , [ `Unknown of string * [`Msg of string] option
-         | `Bad_value of string * string
-         | `Malformed of string
-         | `Misplaced of string * string ] )
-       Result.t
+    -> (config, Error.t) Result.t
 
   val print_config : config -> unit
 end

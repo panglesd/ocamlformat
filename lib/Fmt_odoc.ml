@@ -13,7 +13,7 @@ open Fmt
 open Odoc_parser.Ast
 module Loc = Odoc_parser.Loc
 
-type conf = {fmt_code: string -> (Fmt.t, unit) Result.t}
+type conf = {fmt_code: Docstring.code_formatter}
 
 (** Escape characters if they are not already escaped. [escapeworthy] should
     be [true] if the character should be escaped, [false] otherwise. *)
@@ -67,25 +67,31 @@ let fmt_verbatim_block s =
   in
   hvbox 0 (wrap "{v" "v}" content)
 
-let fmt_metadata s = str "@" $ str s
+let fmt_metadata (lang, meta) =
+  let fmt_meta meta = str " " $ str meta in
+  str "@" $ ign_loc ~f:str lang $ opt meta (ign_loc ~f:fmt_meta)
 
 let fmt_code_block conf s1 s2 =
   let wrap_code x =
-    str "{"
-    $ opt s1 (ign_loc ~f:fmt_metadata)
-    $ fmt "[@;<1 2>" $ x $ fmt "@ ]}"
+    str "{" $ opt s1 fmt_metadata $ fmt "[@;<1000 2>" $ x $ fmt "@ ]}"
   in
-  let s2 = Odoc_parser.Loc.value s2 in
-  match conf.fmt_code s2 with
+  let Odoc_parser.Loc.{location; value} = s2 in
+  match conf.fmt_code value with
   | Ok formatted -> hvbox 0 (wrap_code formatted)
-  | Error () ->
+  | Error (`Msg message) ->
+      ( match message with
+      | "" -> ()
+      | _ ->
+          Docstring.warn Caml.Format.err_formatter
+            { location
+            ; message= Format.sprintf "invalid code block: %s" message } ) ;
       let fmt_line ~first ~last:_ l =
         let l = String.rstrip l in
         if first then str l
         else if String.length l = 0 then str "\n"
         else fmt "@," $ str l
       in
-      let lines = String.split_lines s2 in
+      let lines = String.split_lines value in
       let box = match lines with _ :: _ :: _ -> vbox 0 | _ -> hvbox 0 in
       box (wrap_code (vbox 0 (list_fl lines fmt_line)))
 
@@ -260,13 +266,3 @@ let fmt_block_element c = function
 
 let fmt ~fmt_code (docs : t) =
   vbox 0 (list_block_elem docs (fmt_block_element {fmt_code}))
-
-let diff c x y =
-  let norm z =
-    let f Cmt.{txt; _} = Normalize.docstring c txt in
-    Set.of_list (module String) (List.map ~f z)
-  in
-  Set.symmetric_diff (norm x) (norm y)
-
-let is_tag_only =
-  List.for_all ~f:(function {Loc.value= `Tag _; _} -> true | _ -> false)

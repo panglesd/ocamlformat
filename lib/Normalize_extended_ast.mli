@@ -9,28 +9,17 @@
 (*                                                                        *)
 (**************************************************************************)
 
-(** Normalize abstract syntax trees *)
-
 val dedup_cmts : 'a Extended_ast.t -> 'a -> Cmt.t list -> Cmt.t list
-
-val comment : string -> string
-(** Normalize a comment. *)
-
-val docstring : Conf.t -> string -> string
-(** Normalize a docstring. *)
-
-val normalize : 'a Std_ast.t -> Conf.t -> 'a -> 'a
-(** Normalize an AST fragment. *)
+(** Remove comments that duplicate docstrings (or other comments). *)
 
 val equal :
-  'a Std_ast.t -> ignore_doc_comments:bool -> Conf.t -> 'a -> 'a -> bool
+  'a Extended_ast.t -> ignore_doc_comments:bool -> Conf.t -> 'a -> 'a -> bool
 (** Compare fragments for equality up to normalization. *)
 
-type docstring_error =
-  | Moved of Location.t * Location.t * string
-  | Unstable of Location.t * string * string
-  | Added of Location.t * string
-  | Removed of Location.t * string
+val diff_docstrings :
+  Conf.t -> Cmt.t list -> Cmt.t list -> (string, string) Either.t Sequence.t
+(** Difference between two lists of doc comments. *)
 
-val moved_docstrings :
-  'a Std_ast.t -> Conf.t -> 'a -> 'a -> docstring_error list
+val diff_cmts :
+  Conf.t -> Cmt.t list -> Cmt.t list -> (string, string) Either.t Sequence.t
+(** Difference between two lists of comments. *)

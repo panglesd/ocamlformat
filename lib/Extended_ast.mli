@@ -15,6 +15,8 @@ include module type of Parsetree
 
 type use_file = toplevel_phrase list
 
+type repl_file = repl_phrase list
+
 type 'a t =
   | Structure : structure t
   | Signature : signature t
@@ -22,6 +24,7 @@ type 'a t =
   | Core_type : core_type t
   | Module_type : module_type t
   | Expression : expression t
+  | Repl_file : repl_file t
 
 module Parse : sig
   val ast : 'a t -> Lexing.lexbuf -> 'a
@@ -29,10 +32,30 @@ end
 
 val equal_core_type : core_type -> core_type -> bool
 
+val equal : 'a t -> 'a -> 'a -> bool
+
 val map : 'a t -> Ast_mapper.mapper -> 'a -> 'a
 
 module Pprintast : sig
   include module type of Pprintast
 
   val ast : 'a t -> Format.formatter -> 'a -> unit
+end
+
+module Printast : sig
+  val ast : 'a t -> Format.formatter -> 'a -> unit
+end
+
+module Asttypes : sig
+  include module type of Asttypes
+
+  val is_private : private_flag -> bool
+
+  val is_open : closed_flag -> bool
+
+  val is_override : override_flag -> bool
+
+  val is_mutable : mutable_flag -> bool
+
+  val is_recursive : rec_flag -> bool
 end

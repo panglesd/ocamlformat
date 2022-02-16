@@ -12,28 +12,109 @@
 (** OCamlFormat-RPC *)
 
 open Ocamlformat_lib
-open Ocamlformat_rpc_lib;;
+open Ocamlformat_rpc_lib ;;
 
-Caml.at_exit (Format.pp_print_flush Format.err_formatter);;
+Caml.at_exit (Format.pp_print_flush Format.err_formatter) ;;
 
 Caml.at_exit (Format_.pp_print_flush Format_.err_formatter)
 
-module V = struct
-  type t = V1
+module IO = struct
+  type 'a t = 'a
 
-  let handshake = function
-    | "v1" | "V1" -> `Handled V1
-    | _ -> `Propose_another V1
+  type ic = In_channel.t
 
-  let to_string = function V1 -> "v1"
+  type oc = Out_channel.t
+
+  let ( >>= ) x f = f x
+
+  let return x = x
+
+  let read ic =
+    match Csexp.input ic with
+    | Ok x -> return (Some x)
+    | Error _ -> return None
+
+  let write oc lx =
+    List.iter lx ~f:(Csexp.to_channel oc) ;
+    Out_channel.flush oc ;
+    return ()
 end
 
-type state = Waiting_for_version | Version_defined of (V.t * Conf.t)
+module V = struct
+  let handshake x =
+    match Version.of_string x with
+    | Some v -> `Handled v
+    | None -> `Propose_another Version.V2
+end
+
+type state = Waiting_for_version | Version_defined of (Version.t * Conf.t)
+
+include Make (IO)
 
 let format fg conf source =
   let input_name = "<rpc input>" in
-  let opts = Conf.{debug= false; margin_check= false} in
-  Translation_unit.parse_and_format fg ~input_name ~source conf opts
+  Translation_unit.parse_and_format fg ~input_name ~source conf
+
+let run_config conf c =
+  let rec update conf = function
+    | [] -> Ok conf
+    | (name, value) :: t -> (
+      match Conf.update_value conf ~name ~value with
+      | Ok c -> update c t
+      | Error e -> Error e )
+  in
+  update conf c
+
+let run_path path =
+  Ocamlformat_lib.Conf.build_config ~enable_outside_detected_project:false
+    ~root:None ~file:path ~is_stdin:false
+
+let run_format conf x =
+  List.fold_until ~init:()
+    ~finish:(fun () -> Error (`Format_error (Format.flush_str_formatter ())))
+    ~f:(fun () try_formatting ->
+      match try_formatting conf x with
+      | Ok formatted -> Stop (Ok (`Format formatted))
+      | Error e ->
+          Translation_unit.Error.print Format.str_formatter e ;
+          Continue () )
+    (* The formatting functions are ordered in such a way that the ones
+       expecting a keyword first (like signatures) are placed before the more
+       general ones (like toplevel phrases). Parsing a file as `--impl` with
+       `ocamlformat` processes it as a use file (toplevel phrases) anyway.
+
+       `ocaml-lsp` should use core types, module types and signatures.
+       `ocaml-mdx` should use toplevel phrases, expressions and
+       signatures. *)
+    [ format Core_type
+    ; format Signature
+    ; format Module_type
+    ; format Expression
+    ; format Use_file ]
+
+let run_format_with_args {path; config} conf x =
+  let temp_conf = Option.value_map path ~default:conf ~f:run_path in
+  match
+    Option.value_map config ~default:(Ok temp_conf) ~f:(fun c ->
+        run_config temp_conf c )
+  with
+  | Error e -> Error (`Config_error e)
+  | Ok temp_conf -> run_format temp_conf x
+
+let handle_format_error e = V1.Command.output stdout (`Error e)
+
+let handle_config_error (e : Config_option.Error.t) =
+  let msg =
+    match e with
+    | Bad_value (x, y) ->
+        Format.sprintf "Bad configuration value (%s, %s)" x y
+    | Malformed x -> Format.sprintf "Malformed configuration value %s" x
+    | Misplaced (x, y) ->
+        Format.sprintf "Misplaced configuration value (%s, %s)" x y
+    | Unknown (x, _) -> Format.sprintf "Unknown configuration option %s" x
+  in
+  V1.Command.output stdout (`Error msg) ;
+  Out_channel.flush stdout
 
 let rec rpc_main = function
   | Waiting_for_version -> (
@@ -45,9 +126,9 @@ let rec rpc_main = function
       | `Handled v ->
           Init.output stdout (`Version vstr) ;
           Out_channel.flush stdout ;
-          rpc_main (Version_defined (v, Conf.default_profile))
+          rpc_main (Version_defined (v, Conf.default))
       | `Propose_another v ->
-          let vstr = V.to_string v in
+          let vstr = Version.to_string v in
           Init.output stdout (`Version vstr) ;
           Out_channel.flush stdout ;
           rpc_main Waiting_for_version ) )
@@ -58,63 +139,36 @@ let rec rpc_main = function
       | `Halt -> Ok ()
       | `Unknown | `Error _ -> rpc_main state
       | `Format x ->
-          List.fold_until ~init:()
-            ~finish:(fun () ->
-              V1.Command.output stdout
-                (`Error (Format.flush_str_formatter ())) )
-            ~f:(fun () try_formatting ->
-              match try_formatting conf x with
-              | Ok formatted ->
-                  ignore (Format.flush_str_formatter ()) ;
-                  V1.Command.output stdout (`Format formatted) ;
-                  Stop ()
-              | Error e ->
-                  Translation_unit.Error.print Format.str_formatter e ;
-                  Continue () )
-            (* The formatting functions are ordered in such a way that the
-               ones expecting a keyword first (like signatures) are placed
-               before the more general ones (like toplevel phrases). Parsing
-               a file as `--impl` with `ocamlformat` processes it as a use
-               file (toplevel phrases) anyway.
-
-               `ocaml-lsp` should use core types, module types and
-               signatures. `ocaml-mdx` should use toplevel phrases,
-               expressions and signatures. *)
-            [ format Core_type
-            ; format Signature
-            ; format Module_type
-            ; format Expression
-            ; format Use_file ] ;
-          rpc_main state
-      | `Config c -> (
-          let rec update conf = function
-            | [] -> Ok conf
-            | (name, value) :: t -> (
-              match Conf.update_value conf ~name ~value with
-              | Ok c -> update c t
-              | Error e -> Error e )
+          let conf =
+            match run_format_with_args empty_args conf x with
+            | Ok (`Format formatted) ->
+                V1.Command.output stdout (`Format formatted) ;
+                conf
+            | Error (`Format_error e) -> handle_format_error e ; conf
+            | Error (`Config_error e) -> handle_config_error e ; conf
           in
-          match update conf c with
-          | Ok conf ->
-              V1.Command.output stdout (`Config c) ;
-              Out_channel.flush stdout ;
-              rpc_main (Version_defined (v, conf))
-          | Error e ->
-              let msg =
-                match e with
-                | `Bad_value (x, y) ->
-                    Format.sprintf "Bad configuration value (%s, %s)" x y
-                | `Malformed x ->
-                    Format.sprintf "Malformed configuration value %s" x
-                | `Misplaced (x, y) ->
-                    Format.sprintf "Misplaced configuration value (%s, %s)" x
-                      y
-                | `Unknown (x, _) ->
-                    Format.sprintf "Unknown configuration option %s" x
-              in
-              V1.Command.output stdout (`Error msg) ;
-              Out_channel.flush stdout ;
-              rpc_main state ) ) )
+          rpc_main (Version_defined (v, conf))
+      | `Config c -> (
+        match run_config conf c with
+        | Ok conf ->
+            V1.Command.output stdout (`Config c) ;
+            Out_channel.flush stdout ;
+            rpc_main (Version_defined (v, conf))
+        | Error e -> handle_config_error e ; rpc_main state ) )
+    | V2 -> (
+      match V2.Command.read_input stdin with
+      | `Halt -> Ok ()
+      | `Unknown | `Error _ -> rpc_main state
+      | `Format (x, format_args) ->
+          let conf =
+            match run_format_with_args format_args conf x with
+            | Ok (`Format formatted) ->
+                V2.Command.output stdout (`Format (formatted, format_args)) ;
+                conf
+            | Error (`Format_error e) -> handle_format_error e ; conf
+            | Error (`Config_error e) -> handle_config_error e ; conf
+          in
+          rpc_main (Version_defined (v, conf)) ) )
 
 let rpc_main () = rpc_main Waiting_for_version
 
@@ -144,8 +198,13 @@ let info =
     ; `P
         "Once the client and the server agree on a common version, the \
          requests you can send may differ from one version to another."
-    ; `P "On version $(b,v1), the supported RPC commands are:"
-    ; `P "- $(b,Halt) to close the connection to the RPC"
+    ; `P "All versions support the following commands:"
+    ; `P
+        "- $(b,Halt) to end the communication with the RPC server. The \
+         caller must close the input and output channels."
+    ; `P
+        "Some RPC versions offer specific commands, that are detailed below."
+    ; `P "Specific commands supported on version $(b,v1) are:"
     ; `P
         "- $(b,Config) $(i,CSEXP): submits a list of (key, value) pairs (as \
          a canonical s-expression) to update OCamlFormat's configuration \
@@ -157,10 +216,20 @@ let info =
         "- $(b,Format) $(i,CSEXP): submits a canonical s-expression \
          $(i,CSEXP) to be formatted by OCamlFormat, the formatted output is \
          sent as a reply of the same form $(b,Format) $(i,CSEXP)"
+    ; `P "Specific commands supported on version $(b,v2) are:"
+    ; `P
+        "- $(b,Format) $(i,CSEXP): submits a list as canonical s-expression \
+         $(i,CSEXP), where the first element of the list is a string to be \
+         formatted by OCamlFormat. The other arguments are (key, value) \
+         pairs, where key can be either $(i,\"Path\") and/or \
+         $(i,\"Config\"). They modify the server's configuration \
+         temporarily, for the current request. The formatted output is sent \
+         as a reply of the same form."
     ; `P "Unknown commands are ignored." ]
   in
-  Term.info "ocamlformat-rpc" ~version:Version.version ~doc ~man
+  Cmd.info "ocamlformat-rpc" ~version:Ocamlformat_lib.Version.current ~doc
+    ~man
 
 let rpc_main_t = Term.(const rpc_main $ const ())
 
-let () = Term.exit @@ Term.eval (rpc_main_t, info)
+let () = Caml.exit @@ Cmd.eval_result (Cmd.v info rpc_main_t)

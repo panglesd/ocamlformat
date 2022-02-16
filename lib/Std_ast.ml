@@ -21,36 +21,19 @@ type 'a t =
   | Core_type : core_type t
   | Module_type : module_type t
   | Expression : expression t
+  | Repl_file : unit t
 
 let equal (type a) (_ : a t) : a -> a -> bool = Poly.equal
-
-(* Missing from ocaml_migrate_parsetree *)
-let use_file (mapper : Ast_mapper.mapper) use_file =
-  let open Parsetree in
-  List.map use_file ~f:(fun toplevel_phrase ->
-      match (toplevel_phrase : toplevel_phrase) with
-      | Ptop_def structure -> Ptop_def (mapper.structure mapper structure)
-      | Ptop_dir {pdir_name; pdir_arg; pdir_loc} ->
-          let pdir_arg =
-            match pdir_arg with
-            | None -> None
-            | Some a ->
-                Some {a with pdira_loc= mapper.location mapper a.pdira_loc}
-          in
-          Ptop_dir
-            { pdir_name=
-                {pdir_name with loc= mapper.location mapper pdir_name.loc}
-            ; pdir_arg
-            ; pdir_loc= mapper.location mapper pdir_loc } )
 
 let map (type a) (x : a t) (m : Ast_mapper.mapper) : a -> a =
   match x with
   | Structure -> m.structure m
   | Signature -> m.signature m
-  | Use_file -> use_file m
+  | Use_file -> List.map ~f:(m.toplevel_phrase m)
   | Core_type -> m.typ m
   | Module_type -> m.module_type m
   | Expression -> m.expr m
+  | Repl_file -> Fn.id
 
 module Parse = struct
   let ast (type a) (fg : a t) lexbuf : a =
@@ -61,6 +44,7 @@ module Parse = struct
     | Core_type -> Parse.core_type lexbuf
     | Module_type -> Parse.module_type lexbuf
     | Expression -> Parse.expression lexbuf
+    | Repl_file -> ()
 end
 
 module Pprintast = struct
@@ -75,4 +59,5 @@ module Pprintast = struct
     | Core_type -> core_type
     | Module_type -> module_type
     | Expression -> expression
+    | Repl_file -> fun _ _ -> ()
 end

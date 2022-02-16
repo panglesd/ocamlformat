@@ -4,11 +4,93 @@
 
 #### Deprecated
 
+#### Bug fixes
+
+  + Add missing parentheses around variant class arguments (#1967, @gpetiot)
+
+  + Fix indentation of module binding RHS (#1969, @gpetiot)
+
+  + Fix position of `:=` when `assignment-operator=end-line` (#1985, @gpetiot)
+
+  + Fix position of comments attached to constructor decl (#1986, @gpetiot)
+
+  + Do not wrap docstrings, `wrap-comments` should only impact non-documentation comments, wrapping invalid docstrings would cause the whole file to not be formatted (#1988, @gpetiot)
+
+  + Do not break between 2 module items when the first one has a comment attached on the same line. Only a comment on the next line should induce a break to make it clear to which element it is attached to (#1989, @gpetiot)
+
+  + Preserve position of comments attached to the last node of a subtree (#1667, @gpetiot)
+
+  + Do not override the values of the following non-formatting options when a profile is set: `comment-check`, `disable`, `max-iters`, `ocaml-version`, and `quiet` (#1995, @gpetiot).
+
+  + Remove incorrect parentheses around polymorphic type constraint (#2002, @gpetiot)
+
+#### Changes
+
+  + More expressions are considered "simple" (not inducing a break e.g. as an argument of an application):
+    - Variants with no argument (#1968, @gpetiot)
+    - Empty or singleton arrays/lists (#1943, @gpetiot)
+
+  + Print odoc code block delimiters on their own line (#1980, @gpetiot)
+
+  + Make formatting of cons-list patterns consistent with cons-list expressions, (::) operators are aligned when possible, comments position also improved (#1983, @gpetiot)
+
+  + Apply 'sequence-style' to add a space before ';;' between toplevel items, consistently with the formatting of ';' in sequences (#2004, @gpetiot)
+
+#### New features
+
+  + Format toplevel phrases and their output (#1941, @Julow, @gpetiot).
+    This feature is enabled with the flag `--parse-toplevel-phrases`.
+    Toplevel phrases are supported when they are located in doc-comments blocks and cinaps comments.
+    Whole input files can also be formatted as toplevel phrases with the flag `--repl-file`.
+
+#### RPC
+
+  + ocamlformat-rpc-lib is now functorized over the IO (#1975, @gpetiot).
+    Now handles `Csexp.t` types instead of `Sexplib0.Sexp.t`.
+
+  + RPC v2 (#1935, @panglesd):
+    Define a 'Format' command parameterized with optionnal arguments to set or override the config and path, to format in the style of a file.
+
+### 0.20.1 (2021-12-13)
+
+#### New features
+
+  + Update to odoc-parser 1.0.0 (#1843, @Julow).
+    New syntax: code blocks can carry metadata, e.g.:
+      `{@ocaml kind=toplevel env=e1[ code ]}`
+
+### 0.20.0 (2021-12-06)
+
+#### Deprecated
+
   + Profiles `compact` and `sparse` are now deprecated and will be removed by version 1.0 (#1803, @gpetiot)
 
-  + Options `--align-cases`, `--align-constructors-decl` and `--align-variants-decl` are now deprecated and will be removed by version 1.0 (#1793, @gpetiot)
-
-  + Option `disambiguate-non-breaking-match` is now deprecated and will be removed by version 1.0 (#1805, @gpetiot)
+  + Options that are not set by the preset profiles are now deprecated and will be removed by version 1.0:
+    - `align-cases`, `align-constructors-decl` and `align-variants-decl` (#1793, @gpetiot)
+    - `disambiguate-non-breaking-match` (#1805, @gpetiot)
+    - `break-before-in` (#1888, @gpetiot)
+    - `break-cases={toplevel,all}` (#1890, @gpetiot)
+    - `break-collection-expressions` (#1891, @gpetiot)
+    - `break-fun-decl=smart` (#1892, @gpetiot)
+    - `break-fun-sig=smart` (#1893, @gpetiot)
+    - `break-string-literals` (#1894, @gpetiot)
+    - `break-struct` (#1895, @gpetiot)
+    - `extension-indent` (#1896, @gpetiot)
+    - `function-indent` (#1897, @gpetiot)
+    - `function-indent-nested` (#1898, @gpetiot)
+    - `if-then-else={fit-or-vertical,k-r}` (#1899, @gpetiot)
+    - `indicate-multiline-delimiters=closing-on-separate-line` (#1900, @gpetiot)
+    - `indent-after-in` (#1901, @gpetiot)
+    - `let-binding-indent` (#1902, @gpetiot)
+    - `let-binding-spacing=sparse` (#1903, @gpetiot)
+    - `match-indent` (#1904, @gpetiot)
+    - `match-indent-nested` (#1905, @gpetiot)
+    - `module-item-spacing=preserve` (#1906, @gpetiot)
+    - `nested-match` (#1907, @gpetiot)
+    - `parens-tuple-patterns` (#1908, @gpetiot)
+    - `sequence-style=before` (#1909, @gpetiot)
+    - `stritem-extension-indent` (#1910, @gpetiot)
+    - `type-decl-indent` (#1911, @gpetiot)
 
 #### Bug fixes
 
@@ -40,7 +122,7 @@
 
   + Emacs: only hook ocamlformat mode on tuareg/caml modes when ocamlformat is not disabled (#1814, @gpetiot)
 
-  + Fix boxing of labelled arguments, avoid having a linebreak after a label when the argument has a comment attached (#1830, @gpetiot)
+  + Fix boxing of labelled arguments, avoid having a linebreak after a label when the argument has a comment attached (#1830, #1885, @gpetiot)
 
   + Add missing parentheses around application of prefix op when applied to other operands (#1825, @gpetiot)
 
@@ -48,12 +130,25 @@
 
   + Fix dropped comments attached to a sequence in a sugared extension node (#1853, @gpetiot)
 
+  + Fix formatting of exception types, and add missing parentheses (#1873, @gpetiot)
+
+  + Fix indentation of with-type constraints (#1883, @gpetiot)
+
+  + Preserve sugared syntax of extension points with attributes (#1913, @gpetiot)
+
+  + Improve comment attachment when followed but not preceded by a linebreak (#1926, @gpetiot)
+
+  + Fix position of comments preceding Pmod_ident (#1939, @gpetiot)
+
+  + Make the formatting of attributes and docstrings more consistent (#1929, @gpetiot)
+
+  + Fix stabilization of comments inside attributes (#1942, @gpetiot)
+
 #### Changes
 
   + Set 'module-item-spacing=compact' in the default/conventional profile (#1848, @gpetiot)
 
-  + Preserve bracketed lists in the Parsetree (#1694, @gpetiot)
-    Comments are now wrapped around list elements instead of causing a break.
+  + Preserve bracketed lists in the Parsetree (#1694, #1876, #1914, @gpetiot)
 
   + Line directives now cause OCamlFormat to emit an error, they were previously silently ignored (#1845, @gpetiot)
 
@@ -75,6 +170,9 @@
 
   + Handle let operator punning uniformly with other punning forms.
     Normalizes let operator to the punned form where possible, if output syntax version is at least OCaml 4.13.0. (#1834, #1846, @jberdine)
+
+  + Remove unnecessary surrounding parentheses for immediate objects.
+    This syntax is only produced when the output syntax is at least OCaml 4.14. (#1934, @gpetiot)
 
 ### 0.19.0 (2021-07-16)
 
@@ -115,6 +213,8 @@
   + Do not consider leading star '*' when checking the diff of doc comments (#1712, @hhugo)
 
   + Fix formatting of multiline non-wrapping comments (#1723, @gpetiot)
+
+  + Fix position of comments following a record field (#1945, @gpetiot)
 
 #### Changes
 
