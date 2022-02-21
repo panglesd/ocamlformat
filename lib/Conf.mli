@@ -136,4 +136,4 @@ val build_config :
   -> root:Fpath.t option
   -> file:string
   -> is_stdin:bool
-  -> t
+  -> (t, string) Result.t
