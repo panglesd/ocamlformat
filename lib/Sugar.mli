@@ -58,21 +58,32 @@ val cl_fun :
     and the body of the function [exp]. [will_keep_first_ast_node] is set by
     default, otherwise the [exp] is returned without modification. *)
 
-val infix :
-     Cmts.t
-  -> Prec.t option
-  -> expression Ast.xt
-  -> (expression Ast.xt option * (arg_label * expression Ast.xt) list) list
-(** [infix cmts prec exp] returns the infix operator and the list of operands
-    applied to this operator from expression [exp]. [prec] is the precedence
-    of the infix operator. *)
+module Exp : sig
+  val infix :
+       Cmts.t
+    -> Prec.t option
+    -> expression Ast.xt
+    -> (expression Ast.xt option * (arg_label * expression Ast.xt) list) list
+  (** [infix cmts prec exp] returns the infix operator and the list of
+      operands applied to this operator from expression [exp]. [prec] is the
+      precedence of the infix operator. *)
 
-val infix_cons :
-     Cmts.t
-  -> expression Ast.xt
-  -> (Longident.t loc option * expression Ast.xt) list
-(** [infix_cons exp] returns a list of expressions if [exp] is an expression
-    corresponding to a list ((::) application). *)
+  val infix_cons :
+       Cmts.t
+    -> expression Ast.xt
+    -> (Longident.t loc option * expression Ast.xt) list
+  (** [infix_cons exp] returns a list of expressions if [exp] is an
+      expression corresponding to a list ((::) application). *)
+end
+
+module Pat : sig
+  val infix_cons :
+       Cmts.t
+    -> pattern Ast.xt
+    -> (Longident.t loc option * pattern Ast.xt) list
+  (** [infix_cons pat] returns a list of patterns if [pat] is a pattern
+      corresponding to a list ((::) application). *)
+end
 
 val ite :
      Cmts.t
@@ -81,7 +92,9 @@ val ite :
 (** [ite cmts exp] returns a list of conditional expressions from cascading
     if-then-else expressions, e.g.:
 
-    {[ if c1 then e1 else if c2 then e2 else e3 ]}
+    {[
+      if c1 then e1 else if c2 then e2 else e3
+    ]}
 
     will return the following list:
     [(Some c1, e1); (Some c2, e2); (None, e3)]. *)

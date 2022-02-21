@@ -35,13 +35,19 @@
   (ocaml
    (and
     (>= 4.08)
-    (< 4.14)))
+    (< 4.15)))
   (alcotest :with-test)
   (base
    (and
     (>= v0.12.0)
     (< v0.15)))
-  cmdliner
+  (cmdliner
+   (>= 1.1.0))
+  dune
+  (dune
+   (and
+    :with-test
+    (< 3.0)))
   dune-build-info
   either
   fix
@@ -53,10 +59,10 @@
   (menhirSdk
    (>= 20201216))
   (ocaml-version
-   (>= 3.2.0))
+   (>= 3.3.0))
   ocp-indent
   (odoc-parser
-   (>= 0.9.0))
+   (>= 1.0.0))
   (re
    (>= 1.7.2))
   (stdio
@@ -75,15 +81,18 @@
   (ocaml
    (and
     (>= 4.08)
-    (< 4.14)))
+    (< 4.15)))
   (alcotest :with-test)
   (base
    (and
     (>= v0.12.0)
     (< v0.15)))
-  bechamel
-  bechamel-js
-  cmdliner
+  (bechamel
+   (>= 0.2.0))
+  (bechamel-js
+   (>= 0.2.0))
+  (cmdliner
+   (>= 1.1.0))
   dune-build-info
   either
   fix
@@ -95,10 +104,10 @@
   (menhirSdk
    (>= 20201216))
   (ocaml-version
-   (>= 3.2.0))
+   (>= 3.3.0))
   ocp-indent
   (odoc-parser
-   (>= 0.9.0))
+   (>= 1.0.0))
   (re
    (>= 1.7.2))
   (stdio
@@ -118,14 +127,15 @@
   (ocaml
    (and
     (>= 4.08)
-    (< 4.14)))
+    (< 4.15)))
   ocamlformat-rpc-lib
   (alcotest :with-test)
   (base
    (and
     (>= v0.12.0)
     (< v0.15)))
-  cmdliner
+  (cmdliner
+   (>= 1.1.0))
   dune-build-info
   either
   fix
@@ -137,10 +147,10 @@
   (menhirSdk
    (>= 20201216))
   (ocaml-version
-   (>= 3.2.0))
+   (>= 3.3.0))
   ocp-indent
   (odoc-parser
-   (>= 0.9.0))
+   (>= 1.0.0))
   (re
    (>= 1.7.2))
   (stdio
@@ -160,9 +170,8 @@
   (ocaml
    (and
     (>= 4.08)
-    (< 4.14)))
-  csexp
-  sexplib0))
+    (< 4.15)))
+  csexp))
 
 (package
  (name ocamlformat-lib)
@@ -174,6 +183,5 @@
   (ocaml
    (and
     (>= 4.08)
-    (< 4.14)))
-  csexp
-  sexplib0))
+    (< 4.15)))
+  csexp))

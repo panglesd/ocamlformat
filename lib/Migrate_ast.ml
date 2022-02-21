@@ -9,20 +9,16 @@
 (*                                                                        *)
 (**************************************************************************)
 
-module Asttypes = struct
-  include Asttypes
+module Lexing = struct
+  include Lexing
 
-  let is_private = function Private -> true | Public -> false
+  let set_position lexbuf position =
+    lexbuf.lex_curr_p <-
+      {position with pos_fname= lexbuf.lex_curr_p.pos_fname} ;
+    lexbuf.lex_abs_pos <- position.pos_cnum
 
-  let is_open : closed_flag -> bool = function
-    | Open -> true
-    | Closed -> false
-
-  let is_override = function Override -> true | Fresh -> false
-
-  let is_mutable = function Mutable -> true | Immutable -> false
-
-  let is_recursive = function Recursive -> true | Nonrecursive -> false
+  let set_filename lexbuf fname =
+    lexbuf.lex_curr_p <- {lexbuf.lex_curr_p with pos_fname= fname}
 end
 
 module Position = struct

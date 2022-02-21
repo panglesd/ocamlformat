@@ -16,6 +16,8 @@ let equal_core_type : core_type -> core_type -> bool = Poly.equal
 
 type use_file = toplevel_phrase list
 
+type repl_file = repl_phrase list
+
 type 'a t =
   | Structure : structure t
   | Signature : signature t
@@ -23,34 +25,19 @@ type 'a t =
   | Core_type : core_type t
   | Module_type : module_type t
   | Expression : expression t
+  | Repl_file : repl_file t
 
-(* Missing from ocaml_migrate_parsetree *)
-let use_file (mapper : Ast_mapper.mapper) use_file =
-  let open Parsetree in
-  List.map use_file ~f:(fun toplevel_phrase ->
-      match (toplevel_phrase : toplevel_phrase) with
-      | Ptop_def structure -> Ptop_def (mapper.structure mapper structure)
-      | Ptop_dir {pdir_name; pdir_arg; pdir_loc} ->
-          let pdir_arg =
-            match pdir_arg with
-            | None -> None
-            | Some a ->
-                Some {a with pdira_loc= mapper.location mapper a.pdira_loc}
-          in
-          Ptop_dir
-            { pdir_name=
-                {pdir_name with loc= mapper.location mapper pdir_name.loc}
-            ; pdir_arg
-            ; pdir_loc= mapper.location mapper pdir_loc } )
+let equal (type a) (_ : a t) : a -> a -> bool = Poly.equal
 
 let map (type a) (x : a t) (m : Ast_mapper.mapper) : a -> a =
   match x with
   | Structure -> m.structure m
   | Signature -> m.signature m
-  | Use_file -> use_file m
+  | Use_file -> List.map ~f:(m.toplevel_phrase m)
   | Core_type -> m.typ m
   | Module_type -> m.module_type m
   | Expression -> m.expr m
+  | Repl_file -> List.map ~f:(m.repl_phrase m)
 
 module Parse = struct
   let fix_letop_locs =
@@ -64,7 +51,61 @@ module Parse = struct
     in
     Ast_mapper.{default_mapper with binding_op}
 
-  let normalize fg = map fg fix_letop_locs
+  let list_pat pat =
+    let rec list_pat_ pat acc =
+      match pat.ppat_desc with
+      | Ppat_construct ({txt= Lident "[]"; loc= _}, None) -> (
+        (* Empty lists are always represented as Lident [] *)
+        match acc with [] -> None | _ -> Some (List.rev acc) )
+      | Ppat_construct
+          ( {txt= Lident "::"; loc= _}
+          , Some
+              ( []
+              , { ppat_desc= Ppat_tuple [hd; ({ppat_attributes= []; _} as tl)]
+                ; ppat_attributes= []
+                ; _ } ) ) ->
+          list_pat_ tl (hd :: acc)
+      | _ -> None
+    in
+    list_pat_ pat []
+
+  let list_exp exp =
+    let rec list_exp_ exp acc =
+      match exp.pexp_desc with
+      | Pexp_construct ({txt= Lident "[]"; loc= _}, None) -> (
+        (* Empty lists are always represented as Lident [] *)
+        match acc with [] -> None | _ -> Some (List.rev acc) )
+      | Pexp_construct
+          ( {txt= Lident "::"; loc= _}
+          , Some
+              { pexp_desc= Pexp_tuple [hd; ({pexp_attributes= []; _} as tl)]
+              ; pexp_attributes= []
+              ; _ } ) ->
+          list_exp_ tl (hd :: acc)
+      | _ -> None
+    in
+    list_exp_ exp []
+
+  let normalize_lists =
+    let expr (m : Ast_mapper.mapper) e =
+      let e' =
+        match list_exp e with
+        | Some exprs -> {e with pexp_desc= Pexp_list exprs}
+        | None -> e
+      in
+      Ast_mapper.default_mapper.expr m e'
+    in
+    let pat (m : Ast_mapper.mapper) p =
+      let p' =
+        match list_pat p with
+        | Some pats -> {p with ppat_desc= Ppat_list pats}
+        | None -> p
+      in
+      Ast_mapper.default_mapper.pat m p'
+    in
+    Ast_mapper.{default_mapper with expr; pat}
+
+  let normalize fg x = map fg fix_letop_locs @@ map fg normalize_lists @@ x
 
   let ast (type a) (fg : a t) lexbuf : a =
     normalize fg
@@ -76,12 +117,15 @@ module Parse = struct
     | Core_type -> Parse.core_type lexbuf
     | Module_type -> Parse.module_type lexbuf
     | Expression -> Parse.expression lexbuf
+    | Repl_file -> Toplevel_lexer.repl_file lexbuf
 end
 
 module Pprintast = struct
   include Pprintast
 
   let use_file = Format.pp_print_list top_phrase
+
+  let repl_file = Format.pp_print_list repl_phrase
 
   let ast (type a) : a t -> _ -> a -> _ = function
     | Structure -> structure
@@ -90,4 +134,38 @@ module Pprintast = struct
     | Core_type -> core_type
     | Module_type -> module_type
     | Expression -> expression
+    | Repl_file -> repl_file
+end
+
+module Printast = struct
+  include Printast
+
+  let use_file = Format.pp_print_list top_phrase
+
+  let repl_file = Format.pp_print_list repl_phrase
+
+  let ast (type a) : a t -> _ -> a -> _ = function
+    | Structure -> implementation
+    | Signature -> interface
+    | Use_file -> use_file
+    | Core_type -> core_type 0
+    | Module_type -> module_type 0
+    | Expression -> expression 0
+    | Repl_file -> repl_file
+end
+
+module Asttypes = struct
+  include Asttypes
+
+  let is_private = function Private -> true | Public -> false
+
+  let is_open : closed_flag -> bool = function
+    | Open -> true
+    | Closed -> false
+
+  let is_override = function Override -> true | Fresh -> false
+
+  let is_mutable = function Mutable -> true | Immutable -> false
+
+  let is_recursive = function Recursive -> true | Nonrecursive -> false
 end

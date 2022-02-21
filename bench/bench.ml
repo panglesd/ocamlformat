@@ -24,15 +24,20 @@ type input =
   ; action: [`Format | `Numeric of range] }
 
 let inputs =
-  let source_ml = Stdio.In_channel.read_all "test/source_bench.ml" in
+  let dir = "_build/default/bench/test" in
+  let source_ml = Stdio.In_channel.read_all (dir ^ "/source_bench.ml") in
   [ { name= "format:conventional"
     ; input_name= "source.ml"
     ; kind= Syntax.Structure
     ; source= source_ml
-    ; conf= Conf.default_profile
-    ; action= `Format } ]
-
-let opts = Conf.{debug= false; margin_check= false}
+    ; conf= Conf.default
+    ; action= `Format }
+  ; { name= "numeric:conventional"
+    ; input_name= "source.ml"
+    ; kind= Syntax.Structure
+    ; source= source_ml
+    ; conf= Conf.default
+    ; action= `Numeric (10_000, 10_000) } ]
 
 let tests =
   List.map
@@ -45,11 +50,11 @@ let tests =
         | `Format ->
             ignore
               (Translation_unit.parse_and_format kind ~input_name ~source
-                 conf opts )
+                 conf )
         | `Numeric range ->
             ignore
-              (Translation_unit.numeric kind ~input_name ~source ~range conf
-                 opts ) ) )
+              (Translation_unit.numeric kind ~input_name ~source ~range conf)
+        ) )
     inputs
 
 let benchmark () =

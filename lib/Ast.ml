@@ -19,21 +19,30 @@ type cmt_checker =
   ; cmts_within: Location.t -> bool
   ; cmts_after: Location.t -> bool }
 
-let init, register_reset, leading_nested_match_parens, parens_ite =
+let cmts_between s {cmts_before; cmts_after; _} loc1 loc2 =
+  (cmts_after loc1 && Source.ends_line s loc1) || cmts_before loc2
+
+let ( init
+    , register_reset
+    , leading_nested_match_parens
+    , parens_ite
+    , ocaml_version ) =
   let l = ref [] in
   let leading_nested_match_parens = ref false in
   let parens_ite = ref false in
+  let ocaml_version = ref Ocaml_version.sys_version in
   let register f = l := f :: !l in
   let init (conf : Conf.t) =
-    leading_nested_match_parens := conf.leading_nested_match_parens ;
-    parens_ite := conf.parens_ite ;
+    leading_nested_match_parens := conf.fmt_opts.leading_nested_match_parens ;
+    parens_ite := conf.fmt_opts.parens_ite ;
+    ocaml_version := conf.opr_opts.ocaml_version ;
     List.iter !l ~f:(fun f -> f ())
   in
-  (init, register, leading_nested_match_parens, parens_ite)
+  (init, register, leading_nested_match_parens, parens_ite, ocaml_version)
 
 (** [fit_margin c x] returns [true] if and only if [x] does not exceed 1/3 of
     the margin. *)
-let fit_margin (c : Conf.t) x = x * 3 < c.margin
+let fit_margin (c : Conf.t) x = x * 3 < c.fmt_opts.margin
 
 (** 'Classes' of expressions which are parenthesized differently. *)
 type cls = Let_match | Match | Non_apply | Sequence | Then | ThenElse
@@ -60,8 +69,7 @@ module Token = struct
      |COLONCOLON | COLONEQUAL | DOTDOT | DOTOP _ | EQUAL | GREATER
      |HASHOP _ | INFIXOP0 _ | INFIXOP1 _ | INFIXOP2 _ | INFIXOP3 _
      |INFIXOP4 _ | LESS | LESSMINUS | LETOP _ | MINUS | MINUSDOT
-     |MINUSGREATER | PERCENT | PLUS | PLUSDOT | PLUSEQ | SEMI | SLASH | STAR
-      ->
+     |MINUSGREATER | PERCENT | PLUS | PLUSDOT | PLUSEQ | SLASH | STAR ->
         true
     | _ -> false
 end
@@ -229,7 +237,7 @@ module Longident = struct
 
   (** [fit_margin c x] returns [true] if and only if [x] does not exceed 2/3
       of the margin. *)
-  let fit_margin (c : Conf.t) x = x * 3 < c.margin * 2
+  let fit_margin (c : Conf.t) x = x * 3 < c.fmt_opts.margin * 2
 
   let is_simple c x =
     let rec length (x : Longident.t) =
@@ -242,9 +250,26 @@ module Longident = struct
 end
 
 module Attr = struct
+  module Key = struct
+    type t = Regular | Item | Floating
+
+    let to_string = function
+      | Regular -> "@"
+      | Item -> "@@"
+      | Floating -> "@@@"
+  end
+
   let is_doc = function
     | {attr_name= {Location.txt= "ocaml.doc" | "ocaml.text"; _}; _} -> true
     | _ -> false
+end
+
+module Ext = struct
+  module Key = struct
+    type t = Regular | Item
+
+    let to_string = function Regular -> "%" | Item -> "%%"
+  end
 end
 
 module Exp = struct
@@ -282,15 +307,18 @@ module Exp = struct
         false
     | _ -> List.exists pexp_attributes ~f:(Fn.non Attr.is_doc)
 
-  let rec is_trivial c exp =
+  let rec is_trivial exp =
     match exp.pexp_desc with
     | Pexp_constant {pconst_desc= Pconst_string (_, _, None); _} -> true
     | Pexp_constant _ | Pexp_field _ | Pexp_ident _ | Pexp_send _ -> true
-    | Pexp_construct (_, exp) -> Option.for_all exp ~f:(is_trivial c)
-    | Pexp_apply (e0, [(_, e1)]) when is_prefix e0 -> is_trivial c e1
+    | Pexp_construct (_, exp) -> Option.for_all exp ~f:is_trivial
+    | Pexp_apply (e0, [(_, e1)]) when is_prefix e0 -> is_trivial e1
     | Pexp_apply
         ({pexp_desc= Pexp_ident {txt= Lident "not"; _}; _}, [(_, e1)]) ->
-        is_trivial c e1
+        is_trivial e1
+    | Pexp_variant (_, None) -> true
+    | Pexp_array [] | Pexp_list [] -> true
+    | Pexp_array [x] | Pexp_list [x] -> is_trivial x
     | _ -> false
 
   let rec exposed_left e =
@@ -441,7 +469,7 @@ end
 module Structure_item = struct
   let has_doc itm =
     match itm.pstr_desc with
-    | Pstr_attribute atr -> Option.is_some (fst (doc_atrs [atr]))
+    | Pstr_attribute atr -> Attr.is_doc atr
     | Pstr_eval (_, atrs)
      |Pstr_value (_, {pvb_attributes= atrs; _} :: _)
      |Pstr_primitive {pval_attributes= atrs; _}
@@ -453,7 +481,7 @@ module Structure_item = struct
      |Pstr_extension (_, atrs)
      |Pstr_class_type ({pci_attributes= atrs; _} :: _)
      |Pstr_class ({pci_attributes= atrs; _} :: _) ->
-        Option.is_some (fst (doc_atrs atrs))
+        List.exists ~f:Attr.is_doc atrs
     | Pstr_include
         {pincl_mod= {pmod_attributes= atrs1; _}; pincl_attributes= atrs2; _}
      |Pstr_exception
@@ -462,7 +490,7 @@ module Structure_item = struct
         ; _ }
      |Pstr_module
         {pmb_attributes= atrs1; pmb_expr= {pmod_attributes= atrs2; _}; _} ->
-        Option.is_some (fst (doc_atrs (List.append atrs1 atrs2)))
+        List.exists ~f:Attr.is_doc atrs1 || List.exists ~f:Attr.is_doc atrs2
     | Pstr_value (_, [])
      |Pstr_type (_, [])
      |Pstr_recmodule []
@@ -470,10 +498,10 @@ module Structure_item = struct
      |Pstr_class [] ->
         false
 
-  let is_simple (itm, c) =
-    match c.Conf.module_item_spacing with
+  let is_simple (itm, (c : Conf.t)) =
+    match c.fmt_opts.module_item_spacing with
     | `Compact | `Preserve ->
-        Location.is_single_line itm.pstr_loc c.Conf.margin
+        Location.is_single_line itm.pstr_loc c.fmt_opts.margin
     | `Sparse -> (
       match itm.pstr_desc with
       | Pstr_include {pincl_mod= me; _} | Pstr_module {pmb_expr= me; _} ->
@@ -490,7 +518,9 @@ module Structure_item = struct
       | _ -> false )
 
   let allow_adjacent (itmI, cI) (itmJ, cJ) =
-    match Conf.(cI.module_item_spacing, cJ.module_item_spacing) with
+    match
+      Conf.(cI.fmt_opts.module_item_spacing, cJ.fmt_opts.module_item_spacing)
+    with
     | `Compact, `Compact -> (
       match (itmI.pstr_desc, itmJ.pstr_desc) with
       | Pstr_eval _, Pstr_eval _
@@ -509,11 +539,13 @@ module Structure_item = struct
       | _ -> false )
     | _ -> true
 
-  let break_between s {cmts_before; cmts_after; _} (i1, c1) (i2, c2) =
-    cmts_after i1.pstr_loc || cmts_before i2.pstr_loc || has_doc i1
-    || has_doc i2
+  let break_between s cc (i1, c1) (i2, c2) =
+    cmts_between s cc i1.pstr_loc i2.pstr_loc
+    || has_doc i1 || has_doc i2
     ||
-    match Conf.(c1.module_item_spacing, c2.module_item_spacing) with
+    match
+      Conf.(c1.fmt_opts.module_item_spacing, c2.fmt_opts.module_item_spacing)
+    with
     | `Preserve, `Preserve ->
         Source.empty_line_between s i1.pstr_loc.loc_end i2.pstr_loc.loc_start
     | _ ->
@@ -525,7 +557,7 @@ end
 module Signature_item = struct
   let has_doc itm =
     match itm.psig_desc with
-    | Psig_attribute atr -> Option.is_some (fst (doc_atrs [atr]))
+    | Psig_attribute atr -> Attr.is_doc atr
     | Psig_value {pval_attributes= atrs; _}
      |Psig_type (_, {ptype_attributes= atrs; _} :: _)
      |Psig_typesubst ({ptype_attributes= atrs; _} :: _)
@@ -537,9 +569,9 @@ module Signature_item = struct
      |Psig_extension (_, atrs)
      |Psig_class_type ({pci_attributes= atrs; _} :: _)
      |Psig_class ({pci_attributes= atrs; _} :: _) ->
-        Option.is_some (fst (doc_atrs atrs))
+        List.exists ~f:Attr.is_doc atrs
     | Psig_recmodule
-        ({pmd_type= {pmty_attributes= atrs1; _}; pmd_attributes= atrs2; _}
+        ( {pmd_type= {pmty_attributes= atrs1; _}; pmd_attributes= atrs2; _}
         :: _ )
      |Psig_include
         {pincl_mod= {pmty_attributes= atrs1; _}; pincl_attributes= atrs2; _}
@@ -549,7 +581,7 @@ module Signature_item = struct
         ; _ }
      |Psig_module
         {pmd_attributes= atrs1; pmd_type= {pmty_attributes= atrs2; _}; _} ->
-        Option.is_some (fst (doc_atrs (List.append atrs1 atrs2)))
+        List.exists ~f:Attr.is_doc atrs1 || List.exists ~f:Attr.is_doc atrs2
     | Psig_type (_, [])
      |Psig_typesubst []
      |Psig_recmodule []
@@ -557,10 +589,10 @@ module Signature_item = struct
      |Psig_class [] ->
         false
 
-  let is_simple (itm, c) =
-    match c.Conf.module_item_spacing with
+  let is_simple (itm, (c : Conf.t)) =
+    match c.fmt_opts.module_item_spacing with
     | `Compact | `Preserve ->
-        Location.is_single_line itm.psig_loc c.Conf.margin
+        Location.is_single_line itm.psig_loc c.fmt_opts.margin
     | `Sparse -> (
       match itm.psig_desc with
       | Psig_open {popen_expr= i; _}
@@ -570,7 +602,9 @@ module Signature_item = struct
       | _ -> false )
 
   let allow_adjacent (itmI, cI) (itmJ, cJ) =
-    match Conf.(cI.module_item_spacing, cJ.module_item_spacing) with
+    match
+      Conf.(cI.fmt_opts.module_item_spacing, cJ.fmt_opts.module_item_spacing)
+    with
     | `Compact, `Compact -> (
       match (itmI.psig_desc, itmJ.psig_desc) with
       | Psig_value _, Psig_value _
@@ -590,11 +624,13 @@ module Signature_item = struct
       | _ -> false )
     | _ -> true
 
-  let break_between s {cmts_before; cmts_after; _} (i1, c1) (i2, c2) =
-    cmts_after i1.psig_loc || cmts_before i2.psig_loc || has_doc i1
-    || has_doc i2
+  let break_between s cc (i1, c1) (i2, c2) =
+    cmts_between s cc i1.psig_loc i2.psig_loc
+    || has_doc i1 || has_doc i2
     ||
-    match Conf.(c1.module_item_spacing, c2.module_item_spacing) with
+    match
+      Conf.(c1.fmt_opts.module_item_spacing, c2.fmt_opts.module_item_spacing)
+    with
     | `Preserve, `Preserve ->
         Source.empty_line_between s i1.psig_loc.loc_end i2.psig_loc.loc_start
     | _ ->
@@ -604,32 +640,35 @@ module Signature_item = struct
 end
 
 module Vb = struct
-  let has_doc itm = Option.is_some (fst (doc_atrs itm.pvb_attributes))
+  let has_doc itm = List.exists ~f:Attr.is_doc itm.pvb_attributes
 
-  let is_simple (i, c) =
-    Poly.(c.Conf.module_item_spacing = `Compact)
-    && Location.is_single_line i.pvb_loc c.Conf.margin
+  let is_simple (i, (c : Conf.t)) =
+    Poly.(c.fmt_opts.module_item_spacing = `Compact)
+    && Location.is_single_line i.pvb_loc c.fmt_opts.margin
 
-  let break_between {cmts_before; cmts_after; _} (i1, c1) (i2, c2) =
-    cmts_after i1.pvb_loc || cmts_before i2.pvb_loc || has_doc i1
-    || has_doc i2
+  let break_between s cc (i1, c1) (i2, c2) =
+    cmts_between s cc i1.pvb_loc i2.pvb_loc
+    || has_doc i1 || has_doc i2
     || (not (is_simple (i1, c1)))
     || not (is_simple (i2, c2))
 end
 
 module Td = struct
-  let has_doc itm = Option.is_some (fst (doc_atrs itm.ptype_attributes))
+  let has_doc itm = List.exists ~f:Attr.is_doc itm.ptype_attributes
 
   let is_simple (i, (c : Conf.t)) =
-    match c.module_item_spacing with
-    | `Compact | `Preserve -> Location.is_single_line i.ptype_loc c.margin
+    match c.fmt_opts.module_item_spacing with
+    | `Compact | `Preserve ->
+        Location.is_single_line i.ptype_loc c.fmt_opts.margin
     | `Sparse -> false
 
-  let break_between s {cmts_before; cmts_after; _} (i1, c1) (i2, c2) =
-    cmts_after i1.ptype_loc || cmts_before i2.ptype_loc || has_doc i1
-    || has_doc i2
+  let break_between s cc (i1, c1) (i2, c2) =
+    cmts_between s cc i1.ptype_loc i2.ptype_loc
+    || has_doc i1 || has_doc i2
     ||
-    match Conf.(c1.module_item_spacing, c2.module_item_spacing) with
+    match
+      Conf.(c1.fmt_opts.module_item_spacing, c2.fmt_opts.module_item_spacing)
+    with
     | `Preserve, `Preserve ->
         Source.empty_line_between s i1.ptype_loc.loc_end
           i2.ptype_loc.loc_start
@@ -638,23 +677,25 @@ end
 
 module Class_field = struct
   let has_doc itm =
-    Option.is_some (fst (doc_atrs itm.pcf_attributes))
+    List.exists ~f:Attr.is_doc itm.pcf_attributes
     ||
     match itm.pcf_desc with
-    | Pcf_attribute atr -> Option.is_some (fst (doc_atrs [atr]))
+    | Pcf_attribute atr -> Attr.is_doc atr
     | _ -> false
 
-  let is_simple (itm, c) =
-    match c.Conf.module_item_spacing with
+  let is_simple (itm, (c : Conf.t)) =
+    match c.fmt_opts.module_item_spacing with
     | `Compact | `Preserve ->
-        Location.is_single_line itm.pcf_loc c.Conf.margin
+        Location.is_single_line itm.pcf_loc c.fmt_opts.margin
     | `Sparse -> false
 
-  let break_between s {cmts_before; cmts_after; _} (i1, c1) (i2, c2) =
-    cmts_after i1.pcf_loc || cmts_before i2.pcf_loc || has_doc i1
-    || has_doc i2
+  let break_between s cc (i1, c1) (i2, c2) =
+    cmts_between s cc i1.pcf_loc i2.pcf_loc
+    || has_doc i1 || has_doc i2
     ||
-    match Conf.(c1.module_item_spacing, c2.module_item_spacing) with
+    match
+      Conf.(c1.fmt_opts.module_item_spacing, c2.fmt_opts.module_item_spacing)
+    with
     | `Preserve, `Preserve ->
         Source.empty_line_between s i1.pcf_loc.loc_end i2.pcf_loc.loc_start
     | _ -> (not (is_simple (i1, c1))) || not (is_simple (i2, c2))
@@ -662,23 +703,25 @@ end
 
 module Class_type_field = struct
   let has_doc itm =
-    Option.is_some (fst (doc_atrs itm.pctf_attributes))
+    List.exists ~f:Attr.is_doc itm.pctf_attributes
     ||
     match itm.pctf_desc with
-    | Pctf_attribute atr -> Option.is_some (fst (doc_atrs [atr]))
+    | Pctf_attribute atr -> Attr.is_doc atr
     | _ -> false
 
-  let is_simple (itm, c) =
-    match c.Conf.module_item_spacing with
+  let is_simple (itm, (c : Conf.t)) =
+    match c.fmt_opts.module_item_spacing with
     | `Compact | `Preserve ->
-        Location.is_single_line itm.pctf_loc c.Conf.margin
+        Location.is_single_line itm.pctf_loc c.fmt_opts.margin
     | `Sparse -> false
 
-  let break_between s {cmts_before; cmts_after; _} (i1, c1) (i2, c2) =
-    cmts_after i1.pctf_loc || cmts_before i2.pctf_loc || has_doc i1
-    || has_doc i2
+  let break_between s cc (i1, c1) (i2, c2) =
+    cmts_between s cc i1.pctf_loc i2.pctf_loc
+    || has_doc i1 || has_doc i2
     ||
-    match Conf.(c1.module_item_spacing, c2.module_item_spacing) with
+    match
+      Conf.(c1.fmt_opts.module_item_spacing, c2.fmt_opts.module_item_spacing)
+    with
     | `Preserve, `Preserve ->
         Source.empty_line_between s i1.pctf_loc.loc_end i2.pctf_loc.loc_start
     | _ -> (not (is_simple (i1, c1))) || not (is_simple (i2, c2))
@@ -706,6 +749,7 @@ module T = struct
     | Ctf of class_type_field
     | Tli of toplevel_item
     | Top
+    | Rep
 
   let dump fs = function
     | Pld l -> Format.fprintf fs "Pld:@\n%a" Pprintast.payload l
@@ -727,6 +771,7 @@ module T = struct
     | Tli (`Directive d) ->
         Format.fprintf fs "Dir:@\n%a" Pprintast.toplevel_phrase (Ptop_dir d)
     | Top -> Format.pp_print_string fs "Top"
+    | Rep -> Format.pp_print_string fs "Rep"
 end
 
 include T
@@ -750,6 +795,7 @@ let attributes = function
   | Ctf x -> x.pctf_attributes
   | Top -> []
   | Tli _ -> []
+  | Rep -> []
 
 let location = function
   | Pld _ -> Location.none
@@ -769,14 +815,14 @@ let location = function
   | Tli (`Item x) -> x.pstr_loc
   | Tli (`Directive x) -> x.pdir_loc
   | Top -> Location.none
+  | Rep -> Location.none
 
-let break_between_modules {cmts_before; cmts_after; _} (i1, c1) (i2, c2) =
-  let has_doc itm = Option.is_some (fst (doc_atrs (attributes itm))) in
-  let is_simple (itm, c) =
-    Location.is_single_line (location itm) c.Conf.margin
+let break_between_modules s cc (i1, c1) (i2, c2) =
+  let has_doc itm = List.exists ~f:Attr.is_doc (attributes itm) in
+  let is_simple (itm, (c : Conf.t)) =
+    Location.is_single_line (location itm) c.fmt_opts.margin
   in
-  cmts_after (location i1)
-  || cmts_before (location i2)
+  cmts_between s cc (location i1) (location i2)
   || has_doc i1 || has_doc i2
   || (not (is_simple (i1, c1)))
   || not (is_simple (i2, c2))
@@ -785,9 +831,9 @@ let break_between s cc (i1, c1) (i2, c2) =
   match (i1, i2) with
   | Str i1, Str i2 -> Structure_item.break_between s cc (i1, c1) (i2, c2)
   | Sig i1, Sig i2 -> Signature_item.break_between s cc (i1, c1) (i2, c2)
-  | Vb i1, Vb i2 -> Vb.break_between cc (i1, c1) (i2, c2)
-  | Mty _, Mty _ -> break_between_modules cc (i1, c1) (i2, c2)
-  | Mod _, Mod _ -> break_between_modules cc (i1, c1) (i2, c2)
+  | Vb i1, Vb i2 -> Vb.break_between s cc (i1, c1) (i2, c2)
+  | Mty _, Mty _ -> break_between_modules s cc (i1, c1) (i2, c2)
+  | Mod _, Mod _ -> break_between_modules s cc (i1, c1) (i2, c2)
   | Tli (`Item i1), Tli (`Item i2) ->
       Structure_item.break_between s cc (i1, c1) (i2, c2)
   | Tli (`Directive _), Tli (`Directive _) | Tli _, Tli _ ->
@@ -1116,7 +1162,7 @@ end = struct
       | _ -> assert false )
     | Clf _ -> assert false
     | Ctf _ -> assert false
-    | Top | Tli _ -> assert false
+    | Top | Tli _ | Rep -> assert false
 
   let assert_check_typ xtyp =
     let dump {ctx; ast= typ} = dump ctx (Typ typ) in
@@ -1193,6 +1239,7 @@ end = struct
     | Ctf _ -> assert false
     | Mty _ -> assert false
     | Mod _ -> assert false
+    | Rep -> assert false
 
   let assert_check_cty xcty =
     let dump {ctx; ast= cty} = dump ctx (Cty cty) in
@@ -1251,6 +1298,7 @@ end = struct
     | Ctf _ -> assert false
     | Mty _ -> assert false
     | Mod _ -> assert false
+    | Rep -> assert false
 
   let assert_check_cl xcl =
     let dump {ctx; ast= cl} = dump ctx (Cl cl) in
@@ -1361,7 +1409,7 @@ end = struct
       | _ -> assert false )
     | Clf x -> assert (check_pcstr_fields [x])
     | Ctf _ -> assert false
-    | Top | Tli _ -> assert false
+    | Top | Tli _ | Rep -> assert false
 
   let assert_check_pat xpat =
     let dump {ctx; ast= pat} = dump ctx (Pat pat) in
@@ -1529,7 +1577,7 @@ end = struct
     | Cty _ -> assert false
     | Ctf _ -> assert false
     | Clf x -> assert (check_pcstr_fields [x])
-    | Mod _ | Top | Tli _ | Typ _ | Pat _ | Mty _ | Sig _ | Td _ ->
+    | Mod _ | Top | Tli _ | Typ _ | Pat _ | Mty _ | Sig _ | Td _ | Rep ->
         assert false
 
   let assert_check_exp xexp =
@@ -1539,7 +1587,7 @@ end = struct
   let rec is_simple (c : Conf.t) width ({ast= exp; _} as xexp) =
     let ctx = Exp exp in
     match exp.pexp_desc with
-    | Pexp_constant _ -> Exp.is_trivial c exp
+    | Pexp_constant _ -> Exp.is_trivial exp
     | Pexp_field _ | Pexp_ident _ | Pexp_send _
      |Pexp_construct (_, None)
      |Pexp_variant (_, None) ->
@@ -1550,18 +1598,18 @@ end = struct
         && is_simple c width (sub_exp ~ctx e2)
         && fit_margin c (width xexp)
     | Pexp_construct (_, Some e0) | Pexp_variant (_, Some e0) ->
-        Exp.is_trivial c e0
+        Exp.is_trivial e0
     | Pexp_array e1N | Pexp_list e1N | Pexp_tuple e1N ->
-        List.for_all e1N ~f:(Exp.is_trivial c) && fit_margin c (width xexp)
+        List.for_all e1N ~f:Exp.is_trivial && fit_margin c (width xexp)
     | Pexp_record (e1N, e0) ->
-        Option.for_all e0 ~f:(Exp.is_trivial c)
-        && List.for_all e1N ~f:(snd >> Exp.is_trivial c)
+        Option.for_all e0 ~f:Exp.is_trivial
+        && List.for_all e1N ~f:(snd >> Exp.is_trivial)
         && fit_margin c (width xexp)
     | Pexp_apply ({pexp_desc= Pexp_ident {txt= Lident ":="; _}; _}, _) ->
         false
     | Pexp_apply (e0, e1N) ->
-        Exp.is_trivial c e0
-        && List.for_all e1N ~f:(snd >> Exp.is_trivial c)
+        Exp.is_trivial e0
+        && List.for_all e1N ~f:(snd >> Exp.is_trivial)
         && fit_margin c (width xexp)
     | Pexp_extension (_, PStr [{pstr_desc= Pstr_eval (e0, []); _}]) ->
         is_simple c width (sub_exp ~ctx e0)
@@ -1708,7 +1756,7 @@ end = struct
     | { ctx= Exp _
       ; ast=
           ( Pld _ | Top | Tli _ | Pat _ | Cl _ | Mty _ | Mod _ | Sig _
-          | Str _ | Clf _ | Ctf _ ) }
+          | Str _ | Clf _ | Ctf _ | Rep ) }
      |{ctx= Vb _; ast= _}
      |{ctx= _; ast= Vb _}
      |{ctx= Td _; ast= _}
@@ -1716,13 +1764,13 @@ end = struct
      |{ ctx= Cl _
       ; ast=
           ( Pld _ | Top | Tli _ | Pat _ | Mty _ | Mod _ | Sig _ | Str _
-          | Clf _ | Ctf _ ) }
+          | Clf _ | Ctf _ | Rep ) }
      |{ ctx=
           ( Pld _ | Top | Tli _ | Typ _ | Cty _ | Pat _ | Mty _ | Mod _
-          | Sig _ | Str _ | Clf _ | Ctf _ )
+          | Sig _ | Str _ | Clf _ | Ctf _ | Rep )
       ; ast=
           ( Pld _ | Top | Tli _ | Pat _ | Exp _ | Cl _ | Mty _ | Mod _
-          | Sig _ | Str _ | Clf _ | Ctf _ ) } ->
+          | Sig _ | Str _ | Clf _ | Ctf _ | Rep ) } ->
         None
 
   (** [prec_ast ast] is the precedence of [ast]. Meaningful for binary
@@ -1804,7 +1852,8 @@ end = struct
       | Pcl_apply _ -> Some Apply
       | Pcl_structure _ -> Some Apply
       | _ -> None )
-    | Top | Pat _ | Mty _ | Mod _ | Sig _ | Str _ | Tli _ | Clf _ | Ctf _ ->
+    | Top | Pat _ | Mty _ | Mod _ | Sig _ | Str _ | Tli _ | Clf _ | Ctf _
+     |Rep ->
         None
 
   (** [ambig_prec {ctx; ast}] holds when [ast] is ambiguous in its context
@@ -1837,6 +1886,9 @@ end = struct
     match xtyp with
     | {ast= {ptyp_desc= Ptyp_package _; _}; _} -> true
     | {ast= {ptyp_desc= Ptyp_alias _; _}; ctx= Typ _} -> true
+    | { ast= {ptyp_desc= Ptyp_arrow _ | Ptyp_tuple _; _}
+      ; ctx= Typ {ptyp_desc= Ptyp_class _; _} } ->
+        true
     | { ast= {ptyp_desc= Ptyp_alias _; _}
       ; ctx=
           ( Str {pstr_desc= Pstr_typext _; _}
@@ -1856,23 +1908,10 @@ end = struct
                        | _ -> false )
                | _ -> false ) ->
         true
-    | { ast= {ptyp_desc= Ptyp_alias _; _}
+    | { ast= {ptyp_desc= Ptyp_alias _ | Ptyp_arrow _ | Ptyp_tuple _; _}
       ; ctx=
-          ( Str
-              { pstr_desc=
-                  Pstr_exception
-                    { ptyexn_constructor=
-                        {pext_kind= Pext_decl (_, Pcstr_tuple t, _); _}
-                    ; _ }
-              ; _ }
-          | Sig
-              { psig_desc=
-                  Psig_exception
-                    { ptyexn_constructor=
-                        {pext_kind= Pext_decl (_, Pcstr_tuple t, _); _}
-                    ; _ }
-              ; _ } ) }
-      when List.exists t ~f:(phys_equal typ) ->
+          ( Str {pstr_desc= Pstr_exception _; _}
+          | Sig {psig_desc= Psig_exception _; _} ) } ->
         true
     | _ -> (
       match ambig_prec (sub_ast ~ctx (Typ typ)) with
@@ -1945,10 +1984,7 @@ end = struct
         | Ppat_variant (_, Some _)
         | Ppat_or _ | Ppat_alias _ ) ) ->
         true
-    | ( ( Exp {pexp_desc= Pexp_let _ | Pexp_letop _; _}
-        | Str {pstr_desc= Pstr_value _; _} )
-      , Ppat_constraint (_, {ptyp_desc= Ptyp_poly _; _}) ) ->
-        false
+    | _, Ppat_constraint (_, {ptyp_desc= Ptyp_poly _; _}) -> false
     | ( ( Exp {pexp_desc= Pexp_let _ | Pexp_letop _; _}
         | Str {pstr_desc= Pstr_value _; _} )
       , Ppat_constraint ({ppat_desc= Ppat_any; _}, _) ) ->
@@ -1989,6 +2025,7 @@ end = struct
      |Pat _, Ppat_lazy _
      |Pat _, Ppat_exception _
      |Exp {pexp_desc= Pexp_fun _; _}, Ppat_or _
+     |Cl {pcl_desc= Pcl_fun _; _}, Ppat_variant (_, Some _)
      |Cl {pcl_desc= Pcl_fun _; _}, Ppat_tuple _
      |Cl {pcl_desc= Pcl_fun _; _}, Ppat_construct _
      |Cl {pcl_desc= Pcl_fun _; _}, Ppat_alias _
@@ -2256,6 +2293,9 @@ end = struct
         false
     (* Object fields do not require parens, even with trailing attributes *)
     | Exp {pexp_desc= Pexp_object _; _}, _ -> false
+    | _, {pexp_desc= Pexp_object _; _}
+      when Ocaml_version.(compare !ocaml_version Releases.v4_14 >= 0) ->
+        false
     | ( Exp {pexp_desc= Pexp_construct ({txt= id; _}, _); _}
       , {pexp_attributes= _ :: _; _} )
       when Longident.is_infix id ->

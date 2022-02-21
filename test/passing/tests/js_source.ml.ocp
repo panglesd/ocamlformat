@@ -438,7 +438,6 @@ end
 
 type foo += private B2 = M.B1
 type foo += B3 = M.B1 (* Error: rebind private extension *)
-
 type foo += C = Unknown (* Error: unbound extension *)
 
 (* Extensions can be rebound even if type is closed *)
@@ -530,9 +529,7 @@ let extension_id e = Obj.extension_id (Obj.extension_constructor e)
 let n1 = extension_name Foo
 let n2 = extension_name (Bar 1)
 let t = extension_id (Bar 2) = extension_id (Bar 3) (* true *)
-
 let f = extension_id (Bar 2) = extension_id Foo (* false *)
-
 let is_foo x = extension_id Foo = extension_id x
 
 type foo += Foo
@@ -2287,10 +2284,8 @@ let f : type env a. (env, a) typ -> (env, a) typ -> int =
   | Tint, Tint -> 0
   | Tbool, Tbool -> 1
   | Tvar var, tb -> 2
-  | _ -> .
+  | _ -> . (* error *)
 ;;
-
-(* error *)
 
 (* let x = f Tint (Tvar Zero) ;; *)
 type inkind =
@@ -2453,10 +2448,8 @@ let example6 : type a. a wrapPoly -> a -> int =
   fun w ->
   match w with
   | WrapPoly ATag -> intA
-  | WrapPoly _ -> intA
+  | WrapPoly _ -> intA (* This should not be allowed *)
 ;;
-
-(* This should not be allowed *)
 
 let _ = example6 (WrapPoly AandBTags) `TagB (* This causes a seg fault *)
 
@@ -2606,10 +2599,8 @@ let f (Aux x) =
   | Succ (Succ Zero) -> "2"
   | Succ (Succ (Succ Zero)) -> "3"
   | Succ (Succ (Succ (Succ Zero))) -> "4"
-  | _ -> .
+  | _ -> . (* error *)
 ;;
-
-(* error *)
 
 type _ t = C : ((('a -> 'o) -> 'o) -> ('b -> 'o) -> 'o) t
 
@@ -2762,7 +2753,6 @@ type _ t = I : int t
 let f (type a) (x : a t) =
   let module M = struct
     let (I : a t) = x (* fail because of toplevel let *)
-
     let x = (I : a t)
   end
   in
@@ -2779,7 +2769,6 @@ let bad (type a) =
       val e : (int, a) eq
     end = struct
       let (Refl : (int, a) eq) = M.e (* must fail for soundness *)
-
       let e : (int, a) eq = Refl
     end
   end
@@ -4993,7 +4982,6 @@ let _ = f (module A) (* ok *)
 module A_annotated_alias : S with type t = (module A.A_S) = A
 
 let _ = f (module A_annotated_alias) (* ok *)
-
 let _ = f (module A_annotated_alias : S with type t = (module A.A_S)) (* ok *)
 
 module A_alias = A
@@ -5003,11 +4991,8 @@ module A_alias_expanded = struct
 end
 
 let _ = f (module A_alias_expanded : S with type t = (module A.A_S)) (* ok *)
-
 let _ = f (module A_alias_expanded) (* ok *)
-
 let _ = f (module A_alias : S with type t = (module A.A_S)) (* doesn't type *)
-
 let _ = f (module A_alias) (* doesn't type either *)
 
 module Foo (Bar : sig
@@ -8217,9 +8202,7 @@ end
 
 module type VALUE = sig
   type value (* a Lua value *)
-
   type state (* the state of a Lua interpreter *)
-
   type usert (* a user-defined value *)
 end
 
@@ -8938,16 +8921,13 @@ module OK = struct
 
   let f2 r =
     ignore (r : t);
-    r.x
+    r.x (* non principal *)
   ;;
-
-  (* non principal *)
 
   let f3 (r : t) =
     match r with
-    | { x; y } -> y + y
+    | { x; y } -> y + y (* ok *)
   ;;
-  (* ok *)
 end
 
 module F1 = struct
@@ -9791,4 +9771,66 @@ let xxxxxx =
   let%map (* _____________________________
              __________ *) () = yyyyyyyy in
   { zzzzzzzzzzzzz }
+;;
+
+let _ =
+  match x with
+  | _
+    when f
+        ~f:(function [@ocaml.warning
+             (* ....................................... *) "-4"] _ -> .) -> y
+;;
+
+let[@a
+   (* .............................................. ........................... .......................... ...................... *)
+  foo
+  (* ....................... *)
+  (* ................................. *)
+  (* ...................... *)] _
+  =
+  match[@ocaml.warning (* ....................................... *) "-4"]
+    x [@attr (* .......................... .................. *) some_attr]
+  with
+  | _
+    when f
+        ~f:(function[@ocaml.warning (* ....................................... *) "-4"]
+            | _ -> .)
+        ~f:
+          (function[@ocaml.warning
+             (* ....................................... *)
+            (* ....................................... *)
+            "foooooooooooooooooooooooooooo \
+             fooooooooooooooooooooooooooooooooooooo"]
+            | _ -> .)
+        ~f:
+          (function[@ocaml.warning
+             (* ....................................... *)
+            let x = a
+            and y = b in
+            x + y]
+            | _ -> .) ->
+    y [@attr
+       (* ... *)
+      (* ... *)
+      attr (* ... *)]
+;;
+
+let x =
+  foo (`A b) ~f:(fun thing ->
+      something that reaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaally needs wrapping)
+;;
+
+let x =
+  foo (`A `b) ~f:(fun thing ->
+      something that reaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaally needs wrapping)
+;;
+
+let x =
+  foo [ A; B ] ~f:(fun thing ->
+      something that reaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaally needs wrapping)
+;;
+
+let x =
+  foo [ [ A ]; B ] ~f:(fun thing ->
+      something that reaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaally needs wrapping)
 ;;

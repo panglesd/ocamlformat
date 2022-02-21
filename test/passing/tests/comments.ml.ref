@@ -36,17 +36,17 @@ let foo = function Blah, (x, (* old *) y) -> ()
 
 let foo = function (x, y) (* old *), z -> ()
 
-let _ = if (* a0 *) b (* c0 *) then (* d0 *) e (* f0 *) else (* g0 *) h
-(* i0 *)
+let _ =
+  if (* a0 *) b (* c0 *) then (* d0 *) e (* f0 *) else (* g0 *) h (* i0 *)
 
-let _ = if (* a1 *) b (* c1 *) then (* d1 *) e (* f1 *) else (* g1 *) h
-(* i1 *)
+let _ =
+  if (* a1 *) b (* c1 *) then (* d1 *) e (* f1 *) else (* g1 *) h (* i1 *)
 
-let _ = if (* a2 *) B (* c2 *) then (* d2 *) E (* f2 *) else (* g2 *) H
-(* i2 *)
+let _ =
+  if (* a2 *) B (* c2 *) then (* d2 *) E (* f2 *) else (* g2 *) H (* i2 *)
 
-let _ = if (* a3 *) B (* c3 *) then (* d3 *) E (* f3 *) else (* g3 *) H
-(* i3 *)
+let _ =
+  if (* a3 *) B (* c3 *) then (* d3 *) E (* f3 *) else (* g3 *) H (* i3 *)
 ;;
 
 match x with
@@ -187,11 +187,10 @@ let () =
 
 type t =
   | Aaaaaaaaaa
-  (* Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod
-     tempor incididunt ut labore et dolore magna aliqua. *)
+    (* Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do
+       eiusmod tempor incididunt ut labore et dolore magna aliqua. *)
   | Bbbbbbbbbb (* foo *)
-  | Bbbbbbbbbb
-(* foo *)
+  | Bbbbbbbbbb (* foo *)
 
 let () =
   xxxxxxxxxx
@@ -228,12 +227,10 @@ let rec fooooooooooo = function
   (* AA*)
   (*BB*)
   (* CC *)
-  | x
-    (* DD *)
+  | x (* DD *)
     (* XX *)
     :: (* YY *)
-       (* EE *)
-    t
+       (* EE *) t
   (* FF *)
   (* GG *)
   (* HH *) ->
@@ -242,9 +239,7 @@ let rec fooooooooooo = function
   (* BB *)
   | (module (* CC *)
             (* DD *) F (* EE *) : (* FF *) M (* GG *) )
-    (* HH *)
-    :: (* II *)
-    t
+    (* HH *) :: (* II *) t
   (* JJ *)
   (* KK *) ->
       foo
@@ -255,8 +250,7 @@ let%map
   ()
 
 type t = < (* a *)
-         a: int [@atr] ; (* b *)
-         b: int (* c *) >
+         a: int [@atr] (* b *) ; b: int (* c *) >
 
 type t =
   < a:
@@ -287,8 +281,9 @@ class i =
 let _ =
   try_with (fun () ->
       (* comment before *)
-      match get () with None -> do_something () | Some _ -> ()
-      (* do nothing *) )
+      match get () with
+      | None -> do_something ()
+      | Some _ -> () (* do nothing *) )
 
 let _ = try_with (fun () -> (* comment before *)
                             a ; b (* after b *) )
@@ -333,8 +328,9 @@ let y =
     (* b *)
     x
 
-module A (* A *) () = (* B *)
-                      (* C *)
+module A (* A *) () =
+  (* B *)
+  (* C *)
   B
 
 let kk = (* foo *) (module A : T)

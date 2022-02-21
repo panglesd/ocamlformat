@@ -19,7 +19,7 @@ exception
   Internal_error of
     [ `Cannot_parse of exn
     | `Ast_changed
-    | `Doc_comment of Normalize.docstring_error list
+    | `Doc_comment of Docstring.error list
     | `Comment
     | `Comment_dropped of Cmt.t list
     | `Warning50 of (Location.t * Warnings.t) list ]
@@ -126,19 +126,19 @@ module Error = struct
             ( match m with
             | `Doc_comment l when not quiet ->
                 List.iter l ~f:(function
-                  | Normalize.Added (loc, msg) ->
+                  | Added (loc, msg) ->
                       Format.fprintf fmt
                         "%!@{<loc>%a@}:@,\
                          @{<error>Error@}: Docstring (** %s *) added.\n\
                          %!"
                         Location.print loc msg
-                  | Normalize.Removed (loc, msg) ->
+                  | Removed (loc, msg) ->
                       Format.fprintf fmt
                         "%!@{<loc>%a@}:@,\
                          @{<error>Error@}: Docstring (** %s *) dropped.\n\
                          %!"
                         Location.print loc msg
-                  | Normalize.Moved (loc_before, loc_after, msg) ->
+                  | Moved (loc_before, loc_after, msg) ->
                       if Location.compare loc_before Location.none = 0 then
                         Format.fprintf fmt
                           "%!@{<loc>%a@}:@,\
@@ -160,7 +160,7 @@ module Error = struct
                            %!"
                           Location.print loc_before msg Location.print
                           loc_after
-                  | Normalize.Unstable (loc, x, y) ->
+                  | Unstable (loc, x, y) ->
                       Format.fprintf fmt
                         "%!@{<loc>%a@}:@,\
                          @{<error>Error@}: Formatting of doc-comment is \
@@ -226,9 +226,9 @@ let check_all_locations fmt cmts_t =
         "Warning: Some locations have not been considered\n%!" ;
       List.iter ~f:print (List.sort l ~compare:Location.compare)
 
-let check_margin conf ~filename ~fmted =
+let check_margin (conf : Conf.t) ~filename ~fmted =
   List.iteri (String.split_lines fmted) ~f:(fun i line ->
-      if String.length line > conf.Conf.margin then
+      if String.length line > conf.fmt_opts.margin then
         Format.fprintf Format.err_formatter
           "Warning: %s:%i exceeds the margin\n%!" filename i )
 
@@ -243,13 +243,6 @@ let with_buffer_formatter ~buffer_size k =
   if Buffer.length buffer > 0 then Format_.pp_print_newline fs () ;
   Buffer.contents buffer
 
-let equal fragment ~ignore_doc_comments c a b =
-  Normalize.equal fragment ~ignore_doc_comments c a.Parse_with_comments.ast
-    b.Parse_with_comments.ast
-
-let normalize fragment c {Parse_with_comments.ast; _} =
-  Normalize.normalize fragment c ast
-
 let recover (type a) : a Extended_ast.t -> _ -> a = function
   | Structure -> Parse_wyc.structure
   | Signature -> Parse_wyc.signature
@@ -257,6 +250,7 @@ let recover (type a) : a Extended_ast.t -> _ -> a = function
   | Core_type -> failwith "no recovery for core_type"
   | Module_type -> failwith "no recovery for module_type"
   | Expression -> failwith "no recovery for expression"
+  | Repl_file -> failwith "no recovery for repl_file"
 
 let strconst_mapper locs =
   let constant self c =
@@ -277,17 +271,18 @@ let collect_strlocs (type a) (fg : a Extended_ast.t) (ast : a) :
   List.sort ~compare !locs
 
 let format (type a b) (fg : a Extended_ast.t) (std_fg : b Std_ast.t)
-    ?output_file ~input_name ~prev_source ~parsed ~std_parsed conf opts =
+    ?output_file ~input_name ~prev_source ~parsed ~std_parsed (conf : Conf.t)
+    =
   let open Result.Monad_infix in
   let dump_ast fg ~suffix ast =
-    if opts.Conf.debug then
+    if conf.opr_opts.debug then
       Some
         (dump_ast ~input_name ?output_file ~suffix (fun fmt ->
              Std_ast.Pprintast.ast fg fmt ast ) )
     else None
   in
   let dump_formatted ~suffix fmted =
-    if opts.debug then
+    if conf.opr_opts.debug then
       Some (dump_formatted ~input_name ?output_file ~suffix fmted)
     else None
   in
@@ -297,31 +292,35 @@ let format (type a b) (fg : a Extended_ast.t) (std_fg : b Std_ast.t)
     let format ~box_debug =
       let open Fmt in
       let cmts_t =
-        Cmts.init fg ~debug:opts.debug t.source t.ast t.comments
+        Cmts.init fg ~debug:conf.opr_opts.debug t.source t.ast t.comments
       in
       let contents =
         with_buffer_formatter
           ~buffer_size:(String.length prev_source)
-          ( set_margin conf.margin
-          $ opt conf.max_indent set_max_indent
+          ( set_margin conf.fmt_opts.margin
+          $ opt conf.fmt_opts.max_indent set_max_indent
           $ fmt_if_k
               (not (String.is_empty t.prefix))
               (str t.prefix $ fmt "@.")
           $ with_optional_box_debug ~box_debug
-              (Fmt_ast.fmt_ast fg ~debug:opts.debug t.source cmts_t conf
-                 t.ast ) )
+              (Fmt_ast.fmt_ast fg ~debug:conf.opr_opts.debug t.source cmts_t
+                 conf t.ast ) )
       in
       (contents, cmts_t)
     in
-    if opts.debug then
+    if conf.opr_opts.debug then
       format ~box_debug:true |> fst
       |> dump_formatted ~suffix:".boxes"
       |> (ignore : string option -> unit) ;
     let fmted, cmts_t = format ~box_debug:false in
-    let conf = if opts.debug then conf else {conf with Conf.quiet= true} in
+    let conf =
+      if conf.opr_opts.debug then conf
+      else {conf with opr_opts= {conf.opr_opts with quiet= true}}
+    in
     if String.equal prev_source fmted then (
-      if opts.debug then check_all_locations Format.err_formatter cmts_t ;
-      if opts.Conf.margin_check then
+      if conf.opr_opts.debug then
+        check_all_locations Format.err_formatter cmts_t ;
+      if conf.opr_opts.margin_check then
         check_margin conf ~fmted
           ~filename:(Option.value output_file ~default:input_name) ;
       let strlocs = collect_strlocs fg t.ast in
@@ -348,15 +347,20 @@ let format (type a b) (fg : a Extended_ast.t) (std_fg : b Std_ast.t)
       >>= fun std_t_new ->
       (* Ast not preserved ? *)
       ( if
-        not
-          (equal std_fg ~ignore_doc_comments:(not conf.comment_check) conf
-             std_t std_t_new )
+        (not
+           (Normalize_std_ast.equal std_fg conf std_t.ast std_t_new.ast
+              ~ignore_doc_comments:(not conf.opr_opts.comment_check) ) )
+        && not
+             (Normalize_extended_ast.equal fg conf t.ast t_new.ast
+                ~ignore_doc_comments:(not conf.opr_opts.comment_check) )
       then
         let old_ast =
-          dump_ast std_fg ~suffix:".old" (normalize std_fg conf std_t)
+          dump_ast std_fg ~suffix:".old"
+            (Normalize_std_ast.ast std_fg conf std_t.ast)
         in
         let new_ast =
-          dump_ast std_fg ~suffix:".new" (normalize std_fg conf std_t_new)
+          dump_ast std_fg ~suffix:".new"
+            (Normalize_std_ast.ast std_fg conf std_t_new.ast)
         in
         let args ~suffix =
           [ ("output file", dump_formatted ~suffix fmted)
@@ -365,10 +369,13 @@ let format (type a b) (fg : a Extended_ast.t) (std_fg : b Std_ast.t)
           |> List.filter_map ~f:(fun (s, f_opt) ->
                  Option.map f_opt ~f:(fun f -> (s, String.sexp_of_t f)) )
         in
-        if equal std_fg ~ignore_doc_comments:true conf std_t std_t_new then
+        if
+          Normalize_std_ast.equal std_fg ~ignore_doc_comments:true conf
+            std_t.ast std_t_new.ast
+        then
           let docstrings =
-            Normalize.moved_docstrings std_fg conf
-              std_t.Parse_with_comments.ast std_t_new.Parse_with_comments.ast
+            Normalize_std_ast.moved_docstrings std_fg conf std_t.ast
+              std_t_new.ast
           in
           let args = args ~suffix:".unequal-docs" in
           internal_error (`Doc_comment docstrings) args
@@ -376,7 +383,7 @@ let format (type a b) (fg : a Extended_ast.t) (std_fg : b Std_ast.t)
           let args = args ~suffix:".unequal-ast" in
           internal_error `Ast_changed args ) ;
       (* Comments not preserved ? *)
-      if conf.comment_check then (
+      if conf.opr_opts.comment_check then (
         ( match Cmts.remaining_comments cmts_t with
         | [] -> ()
         | l -> internal_error (`Comment_dropped l) [] ) ;
@@ -389,7 +396,7 @@ let format (type a b) (fg : a Extended_ast.t) (std_fg : b Std_ast.t)
                  should be dropped. *)
               let txt = String.drop_prefix txt 1 in
               let cmt = Cmt.create txt loc in
-              if conf.parse_docstrings then Either.First cmt
+              if conf.fmt_opts.parse_docstrings then Either.First cmt
               else Either.Second cmt
           | _ -> Either.Second cmt
         in
@@ -401,8 +408,9 @@ let format (type a b) (fg : a Extended_ast.t) (std_fg : b Std_ast.t)
         in
         let diff_cmts =
           Sequence.append
-            (Cmts.diff conf old_comments t_newcomments)
-            (Fmt_odoc.diff conf old_docstrings t_newdocstrings)
+            (Normalize_extended_ast.diff_cmts conf old_comments t_newcomments)
+            (Normalize_extended_ast.diff_docstrings conf old_docstrings
+               t_newdocstrings )
         in
         if not (Sequence.is_empty diff_cmts) then
           let old_ast = dump_ast std_fg ~suffix:".old" std_t.ast in
@@ -420,7 +428,7 @@ let format (type a b) (fg : a Extended_ast.t) (std_fg : b Std_ast.t)
           in
           internal_error `Comment args ) ;
       (* Too many iteration ? *)
-      if i >= conf.max_iters then (
+      if i >= conf.opr_opts.max_iters then (
         Caml.flush_all () ;
         Error
           (Unstable {iteration= i; prev= prev_source; next= fmted; input_name}
@@ -468,7 +476,7 @@ let normalize_eol ~strlocs ~line_endings s =
   loop strlocs 0
 
 let parse_and_format (type a b) (fg : a Extended_ast.t)
-    (std_fg : b Std_ast.t) ?output_file ~input_name ~source conf opts =
+    (std_fg : b Std_ast.t) ?output_file ~input_name ~source (conf : Conf.t) =
   Location.input_name := input_name ;
   parse_result Extended_ast.Parse.ast ~disable_w50:true fg conf ~source
     ~input_name
@@ -476,9 +484,11 @@ let parse_and_format (type a b) (fg : a Extended_ast.t)
   parse_result Std_ast.Parse.ast std_fg conf ~source ~input_name
   >>= fun std_parsed ->
   format fg std_fg ?output_file ~input_name ~prev_source:source ~parsed
-    ~std_parsed conf opts
+    ~std_parsed conf
   >>= fun (strlocs, formatted) ->
-  Ok (normalize_eol ~strlocs ~line_endings:conf.Conf.line_endings formatted)
+  Ok
+    (normalize_eol ~strlocs ~line_endings:conf.fmt_opts.line_endings
+       formatted )
 
 let parse_and_format = function
   | Syntax.Structure -> parse_and_format Structure Structure
@@ -487,6 +497,7 @@ let parse_and_format = function
   | Syntax.Core_type -> parse_and_format Core_type Core_type
   | Syntax.Module_type -> parse_and_format Module_type Module_type
   | Syntax.Expression -> parse_and_format Expression Expression
+  | Syntax.Repl_file -> parse_and_format Repl_file Repl_file
 
 let check_line nlines i =
   (* the last line of the buffer (nlines + 1) should not raise an error *)
@@ -503,7 +514,7 @@ let check_range nlines (low, high) =
     Error (Error.User_error (Format.sprintf "Invalid range %i-%i" low high))
 
 let numeric (type a b) (fg : a list Extended_ast.t)
-    (std_fg : b list Std_ast.t) ~input_name ~source ~range conf opts =
+    (std_fg : b list Std_ast.t) ~input_name ~source ~range conf =
   let lines = String.split_lines source in
   let nlines = List.length lines in
   check_range nlines range
@@ -514,7 +525,6 @@ let numeric (type a b) (fg : a list Extended_ast.t)
     let {ast= parsed_ast; _} = parsed in
     match
       format fg std_fg ~input_name ~prev_source:src ~parsed ~std_parsed conf
-        opts
     with
     | Ok (_, fmted_src) -> (
       match
@@ -548,3 +558,4 @@ let numeric = function
   | Syntax.Core_type -> failwith "numeric not implemented for Core_type"
   | Syntax.Module_type -> failwith "numeric not implemented for Module_type"
   | Syntax.Expression -> failwith "numeric not implemented for Expression"
+  | Syntax.Repl_file -> failwith "numeric not implemented for Repl_file"

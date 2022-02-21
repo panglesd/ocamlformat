@@ -18,8 +18,25 @@ val init : Conf.t -> unit
 (** Initialize internal state *)
 
 module Attr : sig
+  module Key : sig
+    type t =
+      | Regular  (** [@attr] *)
+      | Item  (** [@@attr] *)
+      | Floating  (** [@@@attr] *)
+
+    val to_string : t -> string
+  end
+
   val is_doc : attribute -> bool
   (** Holds for docstrings, that are attributes of the form [(** ... *)]. *)
+end
+
+module Ext : sig
+  module Key : sig
+    type t = Regular  (** [%ext] *) | Item  (** [%%ext] *)
+
+    val to_string : t -> string
+  end
 end
 
 module Token : sig
@@ -168,6 +185,7 @@ type t =
   | Ctf of class_type_field
   | Tli of toplevel_item
   | Top
+  | Rep  (** Repl phrase *)
 
 val is_top : t -> bool
 

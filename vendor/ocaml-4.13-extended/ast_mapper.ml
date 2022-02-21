@@ -76,6 +76,10 @@ type mapper = {
   value_binding: mapper -> value_binding -> value_binding;
   value_description: mapper -> value_description -> value_description;
   with_constraint: mapper -> with_constraint -> with_constraint;
+  directive_argument: mapper -> directive_argument -> directive_argument;
+  toplevel_directive: mapper -> toplevel_directive -> toplevel_directive;
+  toplevel_phrase: mapper -> toplevel_phrase -> toplevel_phrase;
+  repl_phrase: mapper -> repl_phrase -> repl_phrase;
 }
 
 let map_fst f (x, y) = (f x, y)
@@ -763,6 +767,27 @@ let default_mapper =
          | PTyp x -> PTyp (this.typ this x)
          | PPat (x, g) -> PPat (this.pat this x, map_opt (this.expr this) g)
       );
+
+    directive_argument =
+      (fun this a ->
+         { pdira_desc= a.pdira_desc
+         ; pdira_loc= this.location this a.pdira_loc} );
+
+    toplevel_directive =
+      (fun this d ->
+         { pdir_name= map_loc this d.pdir_name
+         ; pdir_arg= map_opt (this.directive_argument this) d.pdir_arg
+         ; pdir_loc= this.location this d.pdir_loc } );
+
+    toplevel_phrase =
+      (fun this -> function
+         | Ptop_def s -> Ptop_def (this.structure this s)
+         | Ptop_dir d -> Ptop_dir (this.toplevel_directive this d) );
+
+    repl_phrase =
+      (fun this p ->
+         { prepl_phrase= this.toplevel_phrase this p.prepl_phrase
+         ; prepl_output= p.prepl_output } );
   }
 
 let extension_of_error {kind; main; sub} =

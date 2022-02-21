@@ -9,6 +9,22 @@
 (*                                                                        *)
 (**************************************************************************)
 
+module Error = struct
+  type t =
+    | Bad_value of string * string
+    | Malformed of string
+    | Misplaced of string * string
+    | Unknown of string * [`Msg of string] option
+
+  let to_string = function
+    | Malformed line -> Format.sprintf "Invalid format %S" line
+    | Misplaced (name, _) -> Format.sprintf "%s not allowed here" name
+    | Unknown (name, None) -> Format.sprintf "Unknown option %S" name
+    | Unknown (name, Some (`Msg msg)) ->
+        Format.sprintf "Unknown option %S: %s" name msg
+    | Bad_value (name, msg) -> Format.sprintf "For option %S: %s" name msg
+end
+
 module type CONFIG = sig
   type config
 
@@ -31,9 +47,9 @@ module Make (C : CONFIG) = struct
   type from =
     [`Default | `Profile of string * updated_from | `Updated of updated_from]
 
-  type deprecated = {dmsg: string; dversion: string}
+  type deprecated = {dmsg: string; dversion: Version.t}
 
-  type removed = {rmsg: string; rversion: string}
+  type removed = {rmsg: string; rversion: Version.t}
 
   type status = [`Valid | `Deprecated of deprecated | `Removed of removed]
 
@@ -63,21 +79,21 @@ module Make (C : CONFIG) = struct
 
   let store = ref []
 
-  let deprecated ~since_version:dversion dmsg = {dmsg; dversion}
+  let deprecated ~since:dversion dmsg = {dmsg; dversion}
 
-  let removed ~since_version:rversion rmsg = {rmsg; rversion}
+  let removed ~since:rversion rmsg = {rmsg; rversion}
 
   let in_attributes cond = function
     | Operational -> ""
     | Formatting -> if cond then "" else " Cannot be set in attributes."
 
   let pp_deprecated ppf {dmsg; dversion= v} =
-    Format.fprintf ppf "This option is deprecated since version %s. %s" v
-      dmsg
+    Format.fprintf ppf "This option is deprecated since version %a. %s"
+      Version.pp v dmsg
 
   let pp_removed ppf {rmsg; rversion= v} =
-    Format.fprintf ppf "This option has been removed in version %s. %s" v
-      rmsg
+    Format.fprintf ppf "This option has been removed in version %a. %s"
+      Version.pp v rmsg
 
   let status_doc ppf = function
     | `Valid -> ()
@@ -201,13 +217,13 @@ module Make (C : CONFIG) = struct
       | Some x -> (name, value, doc, `Deprecated x)
 
     let pp_deprecated s ppf {dmsg= msg; dversion= v} =
-      Format.fprintf ppf "Value `%s` is deprecated since version %s. %s" s v
-        msg
+      Format.fprintf ppf "Value `%s` is deprecated since version %a. %s" s
+        Version.pp v msg
 
     let pp_deprecated_with_name ~opt ~val_ ppf {dmsg= msg; dversion= v} =
       Format.fprintf ppf
-        "option `%s`: value `%s` is deprecated since version %s. %s" opt val_
-        v msg
+        "option `%s`: value `%s` is deprecated since version %a. %s" opt val_
+        Version.pp v msg
 
     let status_doc s ppf = function
       | `Valid -> ()
@@ -222,12 +238,12 @@ module Make (C : CONFIG) = struct
   end
 
   module Value_removed = struct
-    type t = {name: string; version: string; msg: string}
+    type t = {name: string; version: Version.t; msg: string}
 
-    let make ~name ~version ~msg = {name; version; msg}
+    let make ~name ~since ~msg = {name; version= since; msg}
 
-    let make_list ~names ~version ~msg =
-      List.map names ~f:(fun name -> make ~name ~version ~msg)
+    let make_list ~names ~since ~msg =
+      List.map names ~f:(fun name -> make ~name ~since ~msg)
 
     let add_parse_errors values conv =
       let parse s =
@@ -235,8 +251,8 @@ module Make (C : CONFIG) = struct
         | Some {name; version; msg} ->
             Format.kasprintf
               (fun s -> Error (`Msg s))
-              "value `%s` has been removed in version %s. %s" name version
-              msg
+              "value `%s` has been removed in version %a. %s" name Version.pp
+              version msg
         | None -> Arg.conv_parser conv s
       in
       Arg.conv (parse, Arg.conv_printer conv)
@@ -275,8 +291,8 @@ module Make (C : CONFIG) = struct
     in
     any conv ~default ~docv ~names ~doc ~kind ~allow_inline ?status update
 
-  let removed_option ~names ~version ~msg =
-    let removed = {rversion= version; rmsg= msg} in
+  let removed_option ~names ~since ~msg =
+    let removed = {rversion= since; rmsg= msg} in
     let status = `Removed removed in
     let msg = Format.asprintf "%a" pp_removed removed in
     let parse _ = Error (`Msg msg) in
@@ -337,14 +353,15 @@ module Make (C : CONFIG) = struct
       ~f:(fun (Pack {names; parse; update; allow_inline; _}) ->
         if List.exists names ~f:(String.equal name) then
           if inline && not allow_inline then
-            Some (Error (`Misplaced (name, value)))
+            Some (Error (Error.Misplaced (name, value)))
           else
             match parse value with
             | Ok packed_value ->
                 let config = update config packed_value in
                 update_from config name from ;
                 Some (Ok config)
-            | Error (`Msg error) -> Some (Error (`Bad_value (name, error)))
+            | Error (`Msg error) ->
+                Some (Error (Error.Bad_value (name, error)))
         else
           match
             List.find names ~f:(fun x -> String.equal ("no-" ^ x) name)
@@ -357,9 +374,9 @@ module Make (C : CONFIG) = struct
                    \"%s=true\" instead."
                   name valid_name valid_name valid_name
               in
-              Some (Error (`Unknown (name, Some (`Msg error))))
+              Some (Error (Error.Unknown (name, Some (`Msg error))))
           | None -> None )
-    |> Option.value ~default:(Error (`Unknown (name, None)))
+    |> Option.value ~default:(Error (Error.Unknown (name, None)))
 
   let default {default; _} = default
 
