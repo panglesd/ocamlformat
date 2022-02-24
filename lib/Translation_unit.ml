@@ -194,6 +194,10 @@ module Error = struct
             Format.fprintf fmt
               "  BUG: unhandled exception. Use [--debug] for details.\n%!" ;
             if debug then Format.fprintf fmt "%s\n%!" (Exn.to_string exn) )
+
+  let to_string ?(debug = false) ?(quiet = false) x =
+    print ~debug ~quiet Format.str_formatter x ;
+    Format.flush_str_formatter ()
 end
 
 let with_file input_name output_file suf ext f =

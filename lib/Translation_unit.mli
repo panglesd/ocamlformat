@@ -17,6 +17,8 @@ module Error : sig
   val equal : t -> t -> bool
 
   val print : ?debug:bool -> ?quiet:bool -> Format.formatter -> t -> unit
+
+  val to_string : ?debug:bool -> ?quiet:bool -> t -> string
 end
 
 val parse_and_format :
